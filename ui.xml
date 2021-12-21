@@ -1,0 +1,199 @@
+<html>
+    <head>
+        <style>
+        	* {
+        		font-family: "Segoe UI";
+        	}
+
+        	body {
+        		flex-direction: row;
+        	}
+        	.verfahrensuebersicht {
+        		max-width: 200px;
+        		background: #efefef;
+        		flex-grow: 1;
+        	}
+
+        	.projekt-ueberschrift {
+				padding: 5px 10px;
+        	}
+
+        	.projekt-ueberschrift p {
+        		font-size: 16px;
+        		font-family: "Segoe UI Bold";
+        	}
+
+        	.projekt-name {
+        		padding: 2.5px 10px;
+        	}
+        	.projekt-name p {
+        		font-size: 12px;
+        	}
+        	.projekt-name:hover {
+        		background: red;
+        		cursor: pointer;
+        	}
+        	.ausgewaehltes-verfahren {
+        		padding: 25px;
+        		flex-grow: 1;
+        	}
+
+        	.ausgewaehltes-verfahren-titel {
+        		max-width: 600px;
+        		font-size: 25px;
+        	}
+
+		    .__azul-native-button {
+		        font-size: 13px;
+		        padding: 5px;
+		        font-family: sans-serif;
+		        color: #4c4c4c;
+		        display: block;
+		        flex-grow: 0;
+		        border: 1px solid rgb(172, 172, 172);
+		        box-shadow: 0px 0px 3px #c5c5c5ad;
+		        background: linear-gradient(#f8f8f8, #dcdcdc);
+		        text-align: center;
+		        flex-direction: column;
+		        justify-content: center;
+		        cursor: pointer;
+		    }
+
+		    .__azul-native-button:hover {
+		        background: linear-gradient(#fcfcfc, #efefef);
+		    }
+
+		    .__azul-native-button:active {
+		        background: linear-gradient(#bebebe, #d8d8d8);
+		    }
+
+		    .verfahren-info {
+		    	padding: 10px 0px;
+		    }
+
+		    .test-buttons {
+		    	flex-direction: row;
+		    	padding: 10px 0px;
+		    }
+
+			.test-buttons > * {
+				margin-right: 10px;
+			}
+		    
+		    .verfahrens-info-zeile {
+		    	flex-direction: row;
+		    	flex-grow: 1;
+		    }
+
+		    .verfahrens-info-zeile p {
+		    	flex-grow: 1;
+		    }
+		    
+		    .verfahrens-info-zeile p.text-rechts {
+		    	text-align: right;
+		    }
+
+		    .status-log {
+		    	padding: 10px;
+		    	background: linear-gradient(#72a0cd, #4e8fcf);
+		    	color: white;
+		    }
+
+		    .status-log-fehler {
+		    	padding: 10px;
+		    	background: linear-gradient(#c8312e, #c8312e);
+		    	color: white;
+		    }
+
+
+		    .status-log-fehler .header {
+		    	padding-bottom: 5px;
+		    }
+
+		    .status-log-fehler .detail {
+		    	background: white;
+		    	color: black;
+		    	border-radius: 4px;
+		    	padding: 5px;
+		    	box-shadow: 0px 0px 10px #00000011;
+		    }
+		    .status-log-ok {
+		    	padding: 10px;
+		    	background: linear-gradient(#19bd9e, #37806e);
+		    	color: white;
+		    }
+        </style>
+    </head>
+    <body>
+    	<div class="verfahrensuebersicht">
+    		 <div class="projekt-ueberschrift"><p>PROJEKTE</p></div>
+    		 <div class="projekt-name"><p>1001 Schenkenberg</p></div>
+    		 <div class="projekt-name"><p>1001 Schenkenberg</p></div>
+    		 <div class="projekt-name"><p>1001 Schenkenberg</p></div>
+    		 <div class="projekt-name"><p>1001 Schenkenberg</p></div>
+    		 <div class="projekt-name"><p>1001 Schenkenberg</p></div>
+    		 <div class="projekt-name"><p>1001 Schenkenberg</p></div>
+    		 <div class="projekt-name"><p>1001 Schenkenberg</p></div>
+    	</div>
+    	<div class="ausgewaehltes-verfahren">
+    		
+    		<p class="ausgewaehltes-verfahren-titel">500106 Neurüdnitz-Neuküstrinchen</p>
+    		
+    		 <div class="test-buttons">
+				<div class="__azul-native-button">
+					<p>Test Abt2. speicher unter</p>
+				</div>
+
+				<div class="__azul-native-button">
+					<p>Test Abt3. speichern unter</p>
+				</div>
+			</div>
+
+    		<div class="test-buttons">
+				<div class="__azul-native-button">
+					<p>Test alle Abt2. löschen</p>
+				</div>
+
+				<div class="__azul-native-button">
+					<p>Test alle Abt3. löschen</p>
+				</div>
+			</div>
+
+    		<div class="test-buttons">
+				<div class="__azul-native-button">
+					<p>.lefis Datei fortführen</p>
+				</div>
+			</div>
+
+    		<div class="verfahren-info">
+    			<div class="verfahrens-info-zeile">
+	    			<p>Verbindung:</p>
+	    			<p class="text-rechts">LEFISPM (http://lefispm.vlf.pdm:80/WebSericeTS)</p>				
+    			</div>
+    			<div class="verfahrens-info-zeile">
+	    			<p>Ordnungsnummern:</p>
+	    			<p class="text-rechts">94</p>				
+    			</div>
+    			<div class="verfahrens-info-zeile">
+	    			<p>Grundbuchblätter:</p>
+	    			<p class="text-rechts">100</p>				
+    			</div>
+    		</div>
+
+    		<div class="status-log">
+    			<p>Status: Übermittle Auftrag...</p>
+    		</div>
+
+			<div class="status-log-fehler">
+    			<div class="header"><p>Fehler: Auftrag konnte nicht fortgeführt werden</p></div>
+    			<div class="detail">
+    				<p>blah blah blah</p>
+    			</div>
+    		</div>
+
+    		<div class="status-log-ok">
+    			<p>Ok: Auftrag wurde fortgeführt</p>
+    		</div>
+    	</div>
+    </body>
+</html>
