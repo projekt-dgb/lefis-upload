@@ -1,0 +1,12 @@
+
+running 1 test
+encoded: <?xml version="1.0" encoding="utf-8"?><soap:Envelope xmlns:soap="http://schemas.xmlsoap.org/soap/envelope/" soap:encodingStyle=""><soap:Body><GetVersionSoapOut xmlns:tns="http://www.aed-sicad.de/namespaces/svr" xmlns:xsi="http://www.w3.org/2001/XMLSchema-instance" /></soap:Body></soap:Envelope>
+test test_decode_yaserde ... FAILED
+
+failures:
+
+failures:
+    test_decode_yaserde
+
+test result: FAILED. 0 passed; 1 failed; 0 ignored; 0 measured; 0 filtered out; finished in 0.00s
+

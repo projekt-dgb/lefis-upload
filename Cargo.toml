@@ -5,3 +5,14 @@ edition = "2021"
 
 [dependencies]
 azul = { path = "../azul/api/rust" }
+serde = "1"
+serde_derive = "1"
+serde_json = "1"
+oracle = "0.5.3"
+reqwest = { version = "0.11.7", default-features = false }
+yaserde = "0.7.1"
+yaserde_derive = "0.7.1"
+log = "0.4.14"
+async-trait = "0.1.51"
+tokio = { version = "1.14.0", features = ["rt", "macros", "rt-multi-thread"] }
+toml = "0.5"
