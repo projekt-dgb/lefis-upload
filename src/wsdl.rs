@@ -1,745 +1,572 @@
-#![allow(dead_code, unused_imports)]
+use lazy_static::lazy_static;
+use regex::Regex;
+use crate::{Waehrung, SchuldenArt};
 
-use yaserde_derive::{YaSerialize, YaDeserialize};
-use std::io::{Read, Write};
-use log::{warn, debug};
+#[derive(Debug, Clone)]
+pub struct AuftragsManager {
+	client: reqwest::Client,
+	url: String,
+	user: Option<String>,
+	password: Option<String>,
+}
 
-pub const SOAP_ENCODING: &str = "http://www.w3.org/2003/05/soap-encoding";
-#[derive(Debug, PartialEq, Default, YaSerialize, YaDeserialize, Clone)]
-pub struct Header {}
+#[derive(Debug, Clone, PartialEq, Default)]
+pub struct GetVersionResponseData {
+	pub get_version_result: String,
+}
 
-#[derive(Debug, PartialEq, Default, YaSerialize, YaDeserialize, Clone)]
-#[yaserde(
-    rename = "Fault",
-    namespace = "soapenv: http://schemas.xmlsoap.org/soap/envelope/",
-    prefix = "soapenv"
-)]
+#[derive(Debug, Clone, PartialEq, Default)]
+pub struct LoginResponseData {
+	pub session_id: usize,
+}
+
+#[derive(Debug, Clone, PartialEq, Default)]
+pub struct GetPreferenceResponseData {
+	pub preference: String,
+}
+
+#[derive(Debug, Clone, PartialEq, Default)]
+pub struct RegisterGzipResponseData {
+	pub auftragsnummer: String,
+}
+
+#[derive(Debug, Clone, PartialEq)]
+pub enum RequestFailure {
+	FailedToSendSoap(String),
+	FailedToDeserializeResponse(String),
+	Soap(SoapFault),
+}
+
+#[derive(Debug, PartialEq, Clone)]
 pub struct SoapFault {
-    #[yaserde(rename = "faultcode", default)]
-    pub fault_code: Option<String>,
-    #[yaserde(rename = "faultstring", default)]
-    pub fault_string: Option<String>,
-}
-
-pub type SoapResponse = Result<(reqwest::StatusCode, String), reqwest::Error>;
-
-
-pub mod messages {
-
-	use yaserde::{YaSerialize, YaDeserialize};
-    use yaserde::de::from_str;
-    use async_trait::async_trait;
-    use yaserde::ser::to_string;
-    use super::*;
-
-    #[derive(Debug, Default, YaSerialize, YaDeserialize, Clone)]
-    #[yaserde(rename = "GetVersionSoapIn")]
-    pub struct GetVersionSoapIn {
-        #[yaserde(flatten, default)]
-        pub parameters: types::GetVersion,
-    }
-    #[derive(Debug, Default, PartialEq, YaSerialize, YaDeserialize, Clone)]
-    #[yaserde(rename = "GetVersionSoapOut")]
-    pub struct GetVersionSoapOut {
-        #[yaserde(flatten, default)]
-        pub parameters: types::GetVersionResponse,
-    }
-    #[derive(Debug, Default, YaSerialize, YaDeserialize, Clone)]
-    #[yaserde(rename = "GetSchemaVersionSoapIn")]
-    pub struct GetSchemaVersionSoapIn {
-        #[yaserde(flatten, default)]
-        pub parameters: types::GetSchemaVersion,
-    }
-    #[derive(Debug, Default, YaSerialize, YaDeserialize, Clone)]
-    #[yaserde(rename = "GetSchemaVersionSoapOut")]
-    pub struct GetSchemaVersionSoapOut {
-        #[yaserde(flatten, default)]
-        pub parameters: types::GetSchemaVersionResponse,
-    }
-    #[derive(Debug, Default, YaSerialize, YaDeserialize, Clone)]
-    #[yaserde(rename = "LoginSoapIn")]
-    pub struct LoginSoapIn {
-        #[yaserde(flatten, default)]
-        pub parameters: types::Login,
-    }
-    #[derive(Debug, Default, YaSerialize, YaDeserialize, Clone)]
-    #[yaserde(rename = "LoginSoapOut")]
-    pub struct LoginSoapOut {
-        #[yaserde(flatten, default)]
-        pub parameters: types::LoginResponse,
-    }
-    #[derive(Debug, Default, YaSerialize, YaDeserialize, Clone)]
-    #[yaserde(rename = "LogoutSoapIn")]
-    pub struct LogoutSoapIn {
-        #[yaserde(flatten, default)]
-        pub parameters: types::Logout,
-    }
-    #[derive(Debug, Default, YaSerialize, YaDeserialize, Clone)]
-    #[yaserde(rename = "LogoutSoapOut")]
-    pub struct LogoutSoapOut {
-        #[yaserde(flatten, default)]
-        pub parameters: types::LogoutResponse,
-    }
-
-}
-
-pub mod types {
-
-    use super::*;
-    use async_trait::async_trait;
-    use yaserde::de::from_str;
-    use yaserde::ser::to_string;
-    use yaserde::{YaDeserialize, YaSerialize};
-
-    #[derive(Debug, Default, YaSerialize, YaDeserialize, Clone)]
-    #[yaserde(
-        rename = "GetVersion",
-        namespace = "tns: http://www.aed-sicad.de/namespaces/svr",
-        namespace = "xsi: http://www.w3.org/2001/XMLSchema-instance",
-        prefix = "tns"
-    )]
-    pub struct GetVersion {}
-    #[derive(Debug, Default, PartialEq, YaSerialize, YaDeserialize, Clone)]
-    #[yaserde(
-        rename = "GetVersionResponse",
-        namespace = "tns: http://www.aed-sicad.de/namespaces/svr",
-        namespace = "xsi: http://www.w3.org/2001/XMLSchema-instance",
-        prefix = "tns"
-    )]
-    pub struct GetVersionResponse {
-        #[yaserde(rename = "GetVersionResult", prefix = "tns", default)]
-        pub get_version_result: Option<String>,
-    }
-    #[derive(Debug, Default, YaSerialize, YaDeserialize, Clone)]
-    #[yaserde(
-        rename = "GetSchemaVersion",
-        namespace = "tns: http://www.aed-sicad.de/namespaces/svr",
-        namespace = "xsi: http://www.w3.org/2001/XMLSchema-instance",
-        prefix = "tns"
-    )]
-    pub struct GetSchemaVersion {}
-    #[derive(Debug, Default, YaSerialize, YaDeserialize, Clone)]
-    #[yaserde(
-        rename = "GetSchemaVersionResponse",
-        namespace = "tns: http://www.aed-sicad.de/namespaces/svr",
-        namespace = "xsi: http://www.w3.org/2001/XMLSchema-instance",
-        prefix = "tns"
-    )]
-    pub struct GetSchemaVersionResponse {
-        #[yaserde(rename = "GetSchemaVersionResult", prefix = "tns", default)]
-        pub get_schema_version_result: Option<String>,
-    }
-    #[derive(Debug, Default, YaSerialize, YaDeserialize, Clone)]
-    #[yaserde(
-        rename = "Login",
-        namespace = "tns: http://www.aed-sicad.de/namespaces/svr",
-        namespace = "xsi: http://www.w3.org/2001/XMLSchema-instance",
-        prefix = "tns"
-    )]
-    pub struct Login {
-        #[yaserde(rename = "user", prefix = "tns", default)]
-        pub user: Option<String>,
-        #[yaserde(rename = "password", prefix = "tns", default)]
-        pub password: Option<String>,
-    }
-    #[derive(Debug, Default, YaSerialize, YaDeserialize, Clone)]
-    #[yaserde(
-        rename = "LoginResponse",
-        namespace = "tns: http://www.aed-sicad.de/namespaces/svr",
-        namespace = "xsi: http://www.w3.org/2001/XMLSchema-instance",
-        prefix = "tns"
-    )]
-    pub struct LoginResponse {
-        #[yaserde(rename = "LoginResult", prefix = "tns", default)]
-        pub login_result: i32,
-    }
-    #[derive(Debug, Default, YaSerialize, YaDeserialize, Clone)]
-    #[yaserde(
-        rename = "Logout",
-        namespace = "tns: http://www.aed-sicad.de/namespaces/svr",
-        namespace = "xsi: http://www.w3.org/2001/XMLSchema-instance",
-        prefix = "tns"
-    )]
-    pub struct Logout {
-        #[yaserde(rename = "sessionId", prefix = "tns", default)]
-        pub session_id: i32,
-    }
-    #[derive(Debug, Default, YaSerialize, YaDeserialize, Clone)]
-    #[yaserde(
-        rename = "LogoutResponse",
-        namespace = "tns: http://www.aed-sicad.de/namespaces/svr",
-        namespace = "xsi: http://www.w3.org/2001/XMLSchema-instance",
-        prefix = "tns"
-    )]
-    pub struct LogoutResponse {}
+	pub code: reqwest::StatusCode,
+	pub error: String,
 }
 
 
-pub mod ports {
-    use super::*;
-    use async_trait::async_trait;
-    use yaserde::de::from_str;
-    use yaserde::ser::to_string;
-    use yaserde::{YaDeserialize, YaSerialize};
-
-   	pub type GetVersionSoapIn = messages::GetVersionSoapIn;
-    pub type GetVersionSoapOut = messages::GetVersionSoapOut;
-    pub type GetSchemaVersionSoapIn = messages::GetSchemaVersionSoapIn;
-    pub type GetSchemaVersionSoapOut = messages::GetSchemaVersionSoapOut;
-    pub type LoginSoapIn = messages::LoginSoapIn;
-    pub type LoginSoapOut = messages::LoginSoapOut;
-    pub type LogoutSoapIn = messages::LogoutSoapIn;
-    pub type LogoutSoapOut = messages::LogoutSoapOut;
-
-
-    #[async_trait]
-    pub trait AuftragsManagerSoap {
-        async fn get_version(
-            &self,
-            get_version_soap_in: GetVersionSoapIn,
-        ) -> Result<GetVersionSoapOut, Option<SoapFault>>;
-        async fn get_schema_version(
-            &self,
-            get_schema_version_soap_in: GetSchemaVersionSoapIn,
-        ) -> Result<GetSchemaVersionSoapOut, Option<SoapFault>>;
-        async fn login(
-            &self,
-            login_soap_in: LoginSoapIn,
-        ) -> Result<LoginSoapOut, Option<SoapFault>>;
-        async fn logout(
-            &self,
-            logout_soap_in: LogoutSoapIn,
-        ) -> Result<LogoutSoapOut, Option<SoapFault>>;
-    }
+lazy_static! {
+    static ref GET_VERSION: Regex = Regex::new(r#"<GetVersionResponse(.*)?><GetVersionResult(.*?)>(.*)</GetVersionResult></GetVersionResponse>"#).unwrap();
+    static ref LOGIN: Regex = Regex::new(r#"<LoginResponse(.*)?><LoginResult(.*?)>(.*)</LoginResult></LoginResponse>"#).unwrap();
+    static ref LOGOUT: Regex = Regex::new(r#"<LogoutResponse(.*)?/>"#).unwrap();
+    static ref GET_PREFERENCE: Regex = Regex::new(r#"<GetPreferenceResponse(.*)?><GetPreferenceResult(.*?)><string>(.*)</string></GetPreferenceResult></GetPreferenceResponse>"#).unwrap();
+    static ref REGISTER_GZIP: Regex = Regex::new(r#"<RegisterGZipResponse(.*)?><RegisterGZipResult(.*?)>(.*)</RegisterGZipResult></RegisterGZipResponse>"#).unwrap();
 }
 
+impl AuftragsManager {
 
-pub mod bindings {
-    use super::*;
-    use async_trait::async_trait;
-    use yaserde::de::from_str;
-    use yaserde::ser::to_string;
-    use yaserde::{YaDeserialize, YaSerialize};
-
-    impl AuftragsManagerSoap {
-        async fn send_soap_request<T: YaSerialize>(
-            &self,
-            request: &T,
-            action: &str,
-        ) -> SoapResponse {
-            let body = to_string(request).expect("failed to generate xml");
-            debug!("SOAP Request: {}", body);
-            let mut req = self
-                .client
-                .post(&self.url)
-                .body(body)
-                .header("Content-Type", "text/xml")
-                .header("Soapaction", action);
-            if let Some(credentials) = &self.credentials {
-                req = req.basic_auth(
-                    credentials.0.to_string(),
-                    Option::Some(credentials.1.to_string()),
-                );
-            }
-            let res = req.send().await?;
-            let status = res.status();
-            debug!("SOAP Status: {}", status);
-            let txt = res.text().await.unwrap_or_default();
-            debug!("SOAP Response: {}", txt);
-            Ok((status, txt))
+    pub fn new(url: &str, user: Option<String>, password: Option<String>) -> Self {
+        AuftragsManager {
+            client: reqwest::Client::new(),
+            url: url.to_string(),
+            user,
+            password,
         }
     }
 
-    #[derive(Debug, Default, YaSerialize, YaDeserialize)]
-    pub struct SoapGetVersionSoapIn {
-        #[yaserde(rename = "GetVersion", default)]
-        pub body: ports::GetVersionSoapIn,
-        #[yaserde(attribute)]
-        pub xmlns: Option<String>,
-    }
-    #[derive(Debug, Default, YaSerialize, YaDeserialize)]
-    #[yaserde(
-        rename = "Envelope",
-        namespace = "soapenv: http://schemas.xmlsoap.org/soap/envelope/",
-        prefix = "soapenv"
-    )]
-    pub struct GetVersionSoapInSoapEnvelope {
-        #[yaserde(rename = "encodingStyle", prefix = "soapenv", attribute)]
-        pub encoding_style: String,
-        #[yaserde(rename = "tns", prefix = "xmlns", attribute)]
-        pub tnsattr: Option<String>,
-        #[yaserde(rename = "urn", prefix = "xmlns", attribute)]
-        pub urnattr: Option<String>,
-        #[yaserde(rename = "xsi", prefix = "xmlns", attribute)]
-        pub xsiattr: Option<String>,
-        #[yaserde(rename = "Header", prefix = "soapenv")]
-        pub header: Option<Header>,
-        #[yaserde(rename = "Body", prefix = "soapenv")]
-        pub body: SoapGetVersionSoapIn,
-    }
+    async fn send_soap_request(&self, body: &str, action: &str) -> Result<(reqwest::StatusCode, String), reqwest::Error> {
 
-    impl GetVersionSoapInSoapEnvelope {
-        pub fn new(body: SoapGetVersionSoapIn) -> Self {
-            GetVersionSoapInSoapEnvelope {
-                encoding_style: SOAP_ENCODING.to_string(),
-                tnsattr: Option::Some("http://www.aed-sicad.de/namespaces/svr".to_string()),
-                body,
-                urnattr: None,
-                xsiattr: None,
-                header: None,
-            }
+    	let req = body.lines().map(|s| s.trim().to_string()).collect::<Vec<_>>().join("");
+
+        let mut req = self
+            .client
+            .post(&self.url)
+            .body(req)
+            .header("Content-Type", "text/xml")
+            .header("Soapaction", action);
+
+        if let Some(user) = &self.user {
+            req = req.basic_auth(
+                user.trim().clone(),
+                self.password.clone(),
+            );
         }
+
+        let res = req.send().await?;
+        let status = res.status();
+        let txt = res.text().await.unwrap_or_default();
+        
+        Ok((status, txt))
     }
 
-    #[derive(Debug, PartialEq, Default, YaSerialize, YaDeserialize)]
-    pub struct SoapGetVersionSoapOut {
-        #[yaserde(rename = "GetVersionSoapOut", default)]
-        pub body: ports::GetVersionSoapOut,
-        #[yaserde(rename = "Fault", default)]
-        pub fault: Option<SoapFault>,
-    }
-    #[derive(Debug, Default, PartialEq, YaSerialize, YaDeserialize)]
-    #[yaserde(
-        rename = "Envelope",
-        namespace = "soapenv: http://schemas.xmlsoap.org/soap/envelope/",
-        prefix = "soapenv"
-    )]
-    pub struct GetVersionSoapOutSoapEnvelope {
-        #[yaserde(rename = "encodingStyle", prefix = "soapenv", attribute)]
-        pub encoding_style: String,
-        #[yaserde(rename = "tns", prefix = "xmlns", attribute)]
-        pub tnsattr: Option<String>,
-        #[yaserde(rename = "urn", prefix = "xmlns", attribute)]
-        pub urnattr: Option<String>,
-        #[yaserde(rename = "xsi", prefix = "xmlns", attribute)]
-        pub xsiattr: Option<String>,
-        #[yaserde(rename = "Header", prefix = "soapenv")]
-        pub header: Option<Header>,
-        #[yaserde(rename = "Body", prefix = "soapenv")]
-        pub body: SoapGetVersionSoapOut,
-    }
+	pub async fn get_version(&self) 
+	-> Result<GetVersionResponseData, RequestFailure> 
+	{
+		let request = format!("
+			<?xml version=\"1.0\" encoding=\"utf-8\"?>
+			<soap:Envelope xmlns:soap=\"http://schemas.xmlsoap.org/soap/envelope/\" xmlns:xsi=\"http://www.w3.org/2001/XMLSchema-instance\" xmlns:xsd=\"http://www.w3.org/2001/XMLSchema\">
+				<soap:Body>
+					<GetVersion xmlns=\"http://www.aed-sicad.de/namespaces/svr\" />
+				</soap:Body>
+			</soap:Envelope>"
+		);
 
-    impl GetVersionSoapOutSoapEnvelope {
-        pub fn new(body: SoapGetVersionSoapOut) -> Self {
-            GetVersionSoapOutSoapEnvelope {
-                encoding_style: SOAP_ENCODING.to_string(),
-                tnsattr: Option::Some("http://www.aed-sicad.de/namespaces/svr".to_string()),
-                body,
-                urnattr: None,
-                xsiattr: None,
-                header: None,
-            }
+        let (status, response) = self
+            .send_soap_request(&request, "http://www.aed-sicad.de/namespaces/svr/GetVersion")
+            .await
+            .map_err(|e| RequestFailure::FailedToSendSoap(format!("{}", e)))?;
+
+        if status != reqwest::StatusCode::OK {
+        	return Err(RequestFailure::Soap(SoapFault {
+        		code: status,
+				error: response, 		
+        	}));
         }
-    }
 
-    #[derive(Debug, Default, YaSerialize, YaDeserialize)]
-    pub struct SoapGetSchemaVersionSoapIn {
-        #[yaserde(rename = "GetSchemaVersion", default)]
-        pub body: ports::GetSchemaVersionSoapIn,
-        #[yaserde(attribute)]
-        pub xmlns: Option<String>,
-    }
-    #[derive(Debug, Default, YaSerialize, YaDeserialize)]
-    #[yaserde(
-        rename = "Envelope",
-        namespace = "soapenv: http://schemas.xmlsoap.org/soap/envelope/",
-        prefix = "soapenv"
-    )]
-    pub struct GetSchemaVersionSoapInSoapEnvelope {
-        #[yaserde(rename = "encodingStyle", prefix = "soapenv", attribute)]
-        pub encoding_style: String,
-        #[yaserde(rename = "tns", prefix = "xmlns", attribute)]
-        pub tnsattr: Option<String>,
-        #[yaserde(rename = "urn", prefix = "xmlns", attribute)]
-        pub urnattr: Option<String>,
-        #[yaserde(rename = "xsi", prefix = "xmlns", attribute)]
-        pub xsiattr: Option<String>,
-        #[yaserde(rename = "Header", prefix = "soapenv")]
-        pub header: Option<Header>,
-        #[yaserde(rename = "Body", prefix = "soapenv")]
-        pub body: SoapGetSchemaVersionSoapIn,
-    }
+	    let capture = match GET_VERSION.captures_iter(&response).nth(0).and_then(|c| Some(c.get(3)?.as_str().to_string())) {
+	    	Some(s) => s,
+	    	None => return Err(RequestFailure::FailedToDeserializeResponse("GetVersion".to_string()))
+	    };
+	
+	    Ok(GetVersionResponseData {
+	    	get_version_result: capture,
+	    })
+	}
 
-    impl GetSchemaVersionSoapInSoapEnvelope {
-        pub fn new(body: SoapGetSchemaVersionSoapIn) -> Self {
-            GetSchemaVersionSoapInSoapEnvelope {
-                encoding_style: SOAP_ENCODING.to_string(),
-                tnsattr: Option::Some("http://www.aed-sicad.de/namespaces/svr".to_string()),
-                body,
-                urnattr: None,
-                xsiattr: None,
-                header: None,
-            }
+	pub async fn login(&self) -> Result<LoginResponseData, RequestFailure> {
+
+		let user = self.user.as_ref();
+		let password = self.password.as_ref();
+
+		let request = format!("
+			<?xml version=\"1.0\" encoding=\"utf-8\"?>
+			<soap:Envelope xmlns:soap=\"http://schemas.xmlsoap.org/soap/envelope/\" xmlns:xsi=\"http://www.w3.org/2001/XMLSchema-instance\" xmlns:xsd=\"http://www.w3.org/2001/XMLSchema\">
+			<soap:Body>
+				<Login xmlns=\"http://www.aed-sicad.de/namespaces/svr\">
+				{user}
+				{password}
+				</Login>
+			</soap:Body>
+		</soap:Envelope>",
+			user = match user { Some(s) => format!("<user>{}</user>", s), None => format!("<user />") },
+			password = match (user, password) { (Some(_), Some(s)) => format!("<password>{}</password>", s), _ => format!("<password />") },
+		);
+
+        let (status, response) = self
+            .send_soap_request(&request, "http://www.aed-sicad.de/namespaces/svr/Login")
+            .await
+            .map_err(|e| RequestFailure::FailedToSendSoap(format!("{}", e)))?;
+
+        if status != reqwest::StatusCode::OK {
+        	return Err(RequestFailure::Soap(SoapFault {
+        		code: status,
+				error: response, 		
+        	}));
         }
-    }
 
-    #[derive(Debug, Default, YaSerialize, YaDeserialize)]
-    pub struct SoapGetSchemaVersionSoapOut {
-        #[yaserde(rename = "GetSchemaVersionSoapOut", default)]
-        pub body: ports::GetSchemaVersionSoapOut,
-        #[yaserde(rename = "Fault", default)]
-        pub fault: Option<SoapFault>,
-    }
-    #[derive(Debug, Default, YaSerialize, YaDeserialize)]
-    #[yaserde(
-        rename = "Envelope",
-        namespace = "soapenv: http://schemas.xmlsoap.org/soap/envelope/",
-        prefix = "soapenv"
-    )]
-    pub struct GetSchemaVersionSoapOutSoapEnvelope {
-        #[yaserde(rename = "encodingStyle", prefix = "soapenv", attribute)]
-        pub encoding_style: String,
-        #[yaserde(rename = "tns", prefix = "xmlns", attribute)]
-        pub tnsattr: Option<String>,
-        #[yaserde(rename = "urn", prefix = "xmlns", attribute)]
-        pub urnattr: Option<String>,
-        #[yaserde(rename = "xsi", prefix = "xmlns", attribute)]
-        pub xsiattr: Option<String>,
-        #[yaserde(rename = "Header", prefix = "soapenv")]
-        pub header: Option<Header>,
-        #[yaserde(rename = "Body", prefix = "soapenv")]
-        pub body: SoapGetSchemaVersionSoapOut,
-    }
+	    let capture = match LOGIN.captures_iter(&response).nth(0).and_then(|c| Some(c.get(3)?.as_str().parse::<usize>().ok()?)) {
+	    	Some(s) => s,
+	    	None => return Err(RequestFailure::FailedToDeserializeResponse("Login".to_string()))
+	    };
+	
+	    Ok(LoginResponseData {
+	    	session_id: capture,
+	    })
+	}
 
-    impl GetSchemaVersionSoapOutSoapEnvelope {
-        pub fn new(body: SoapGetSchemaVersionSoapOut) -> Self {
-            GetSchemaVersionSoapOutSoapEnvelope {
-                encoding_style: SOAP_ENCODING.to_string(),
-                tnsattr: Option::Some("http://www.aed-sicad.de/namespaces/svr".to_string()),
-                body,
-                urnattr: None,
-                xsiattr: None,
-                header: None,
-            }
+	pub async fn get_preference(&self, session_id: usize, preference: &str) -> Result<GetPreferenceResponseData, RequestFailure> {
+
+		let request = format!("
+			<?xml version=\"1.0\" encoding=\"utf-8\"?>
+			<soap:Envelope xmlns:soap=\"http://schemas.xmlsoap.org/soap/envelope/\" xmlns:xsi=\"http://www.w3.org/2001/XMLSchema-instance\" xmlns:xsd=\"http://www.w3.org/2001/XMLSchema\">
+				<soap:Body>
+					<GetPreference xmlns=\"http://www.aed-sicad.de/namespaces/svr\">
+						<sessionId>{session_id}</sessionId>
+						<preferenceName>{preference}</preferenceName>
+					</GetPreference>
+				</soap:Body>
+			</soap:Envelope>",
+			session_id = session_id,
+			preference = preference
+		);
+
+        let (status, response) = self
+            .send_soap_request(&request, "http://www.aed-sicad.de/namespaces/svr/GetPreference")
+            .await
+            .map_err(|e| RequestFailure::FailedToSendSoap(format!("{}", e)))?;
+
+        if status != reqwest::StatusCode::OK {
+        	return Err(RequestFailure::Soap(SoapFault {
+        		code: status,
+				error: response, 		
+        	}));
         }
-    }
 
-    #[derive(Debug, Default, YaSerialize, YaDeserialize)]
-    pub struct SoapLoginSoapIn {
-        #[yaserde(rename = "Login", default)]
-        pub body: ports::LoginSoapIn,
-        #[yaserde(attribute)]
-        pub xmlns: Option<String>,
-    }
-    #[derive(Debug, Default, YaSerialize, YaDeserialize)]
-    #[yaserde(
-        rename = "Envelope",
-        namespace = "soapenv: http://schemas.xmlsoap.org/soap/envelope/",
-        prefix = "soapenv"
-    )]
-    pub struct LoginSoapInSoapEnvelope {
-        #[yaserde(rename = "encodingStyle", prefix = "soapenv", attribute)]
-        pub encoding_style: String,
-        #[yaserde(rename = "tns", prefix = "xmlns", attribute)]
-        pub tnsattr: Option<String>,
-        #[yaserde(rename = "urn", prefix = "xmlns", attribute)]
-        pub urnattr: Option<String>,
-        #[yaserde(rename = "xsi", prefix = "xmlns", attribute)]
-        pub xsiattr: Option<String>,
-        #[yaserde(rename = "Header", prefix = "soapenv")]
-        pub header: Option<Header>,
-        #[yaserde(rename = "Body", prefix = "soapenv")]
-        pub body: SoapLoginSoapIn,
-    }
+	    let capture = match GET_PREFERENCE.captures_iter(&response).nth(0).and_then(|c| Some(c.get(3)?.as_str().to_string())) {
+	    	Some(s) => s,
+	    	None => return Err(RequestFailure::FailedToDeserializeResponse("GetPreference".to_string()))
+	    };
+	
+	    Ok(GetPreferenceResponseData {
+	    	preference: capture
+	    })
+	}
 
-    impl LoginSoapInSoapEnvelope {
-        pub fn new(body: SoapLoginSoapIn) -> Self {
-            LoginSoapInSoapEnvelope {
-                encoding_style: SOAP_ENCODING.to_string(),
-                tnsattr: Option::Some("http://www.aed-sicad.de/namespaces/svr".to_string()),
-                body,
-                urnattr: None,
-                xsiattr: None,
-                header: None,
-            }
+	pub async fn register_gzip(&self, session_id: usize, nba_xml: &str)  -> Result<RegisterGzipResponseData, RequestFailure> {
+		
+		let request = format!("
+			<?xml version=\"1.0\" encoding=\"utf-8\"?>
+			<soap:Envelope xmlns:soap=\"http://schemas.xmlsoap.org/soap/envelope/\" xmlns:xsi=\"http://www.w3.org/2001/XMLSchema-instance\" xmlns:xsd=\"http://www.w3.org/2001/XMLSchema\">
+				<soap:Body>
+					<GetPreference xmlns=\"http://www.aed-sicad.de/namespaces/svr\">
+						<sessionId>{session_id}</sessionId>
+						<auftragGZip>{auftrag_gzip}</auftragGZip>
+					</GetPreference>
+				</soap:Body>
+			</soap:Envelope>",
+			session_id = session_id,
+			auftrag_gzip = encode_gzip_base64(nba_xml).unwrap_or_default(),
+		);
+
+        let (status, response) = self
+            .send_soap_request(&request, "http://www.aed-sicad.de/namespaces/svr/RegisterGZip")
+            .await
+            .map_err(|e| RequestFailure::FailedToSendSoap(format!("{}", e)))?;
+
+        if status != reqwest::StatusCode::OK {
+        	return Err(RequestFailure::Soap(SoapFault {
+        		code: status,
+				error: response, 		
+        	}));
         }
-    }
 
-    #[derive(Debug, Default, YaSerialize, YaDeserialize)]
-    pub struct SoapLoginSoapOut {
-        #[yaserde(rename = "LoginSoapOut", default)]
-        pub body: ports::LoginSoapOut,
-        #[yaserde(rename = "Fault", default)]
-        pub fault: Option<SoapFault>,
-    }
-    #[derive(Debug, Default, YaSerialize, YaDeserialize)]
-    #[yaserde(
-        rename = "Envelope",
-        namespace = "soapenv: http://schemas.xmlsoap.org/soap/envelope/",
-        prefix = "soapenv"
-    )]
-    pub struct LoginSoapOutSoapEnvelope {
-        #[yaserde(rename = "encodingStyle", prefix = "soapenv", attribute)]
-        pub encoding_style: String,
-        #[yaserde(rename = "tns", prefix = "xmlns", attribute)]
-        pub tnsattr: Option<String>,
-        #[yaserde(rename = "urn", prefix = "xmlns", attribute)]
-        pub urnattr: Option<String>,
-        #[yaserde(rename = "xsi", prefix = "xmlns", attribute)]
-        pub xsiattr: Option<String>,
-        #[yaserde(rename = "Header", prefix = "soapenv")]
-        pub header: Option<Header>,
-        #[yaserde(rename = "Body", prefix = "soapenv")]
-        pub body: SoapLoginSoapOut,
-    }
+	    let capture = match REGISTER_GZIP.captures_iter(&response).nth(0).and_then(|c| Some(c.get(3)?.as_str().to_string())) {
+	    	Some(s) => s,
+	    	None => return Err(RequestFailure::FailedToDeserializeResponse("RegisterGZip".to_string()))
+	    };
+	
+	    Ok(RegisterGzipResponseData {
+	    	auftragsnummer: capture
+	    })
+	}
 
-    impl LoginSoapOutSoapEnvelope {
-        pub fn new(body: SoapLoginSoapOut) -> Self {
-            LoginSoapOutSoapEnvelope {
-                encoding_style: SOAP_ENCODING.to_string(),
-                tnsattr: Option::Some("http://www.aed-sicad.de/namespaces/svr".to_string()),
-                body,
-                urnattr: None,
-                xsiattr: None,
-                header: None,
-            }
+	pub async fn logout(&self, session_id: usize) -> Result<(), RequestFailure> {
+
+		let request = format!("
+			<?xml version=\"1.0\" encoding=\"utf-8\"?>
+			<soap:Envelope xmlns:soap=\"http://schemas.xmlsoap.org/soap/envelope/\" xmlns:xsi=\"http://www.w3.org/2001/XMLSchema-instance\" xmlns:xsd=\"http://www.w3.org/2001/XMLSchema\">
+				<soap:Body>
+					<Logout xmlns=\"http://www.aed-sicad.de/namespaces/svr\">
+						<sessionId>{session_id}</sessionId>
+					</Logout>
+				</soap:Body>
+			</soap:Envelope>",
+			session_id = session_id,
+		);
+
+        let (status, response) = self
+            .send_soap_request(&request, "http://www.aed-sicad.de/namespaces/svr/Logout")
+            .await
+            .map_err(|e| RequestFailure::FailedToSendSoap(format!("{}", e)))?;
+
+        if status != reqwest::StatusCode::OK {
+        	return Err(RequestFailure::Soap(SoapFault {
+        		code: status,
+				error: response, 		
+        	}));
         }
-    }
 
-    #[derive(Debug, Default, YaSerialize, YaDeserialize)]
-    pub struct SoapLogoutSoapIn {
-        #[yaserde(rename = "Logout", default)]
-        pub body: ports::LogoutSoapIn,
-        #[yaserde(attribute)]
-        pub xmlns: Option<String>,
-    }
-    #[derive(Debug, Default, YaSerialize, YaDeserialize)]
-    #[yaserde(
-        rename = "Envelope",
-        namespace = "soapenv: http://schemas.xmlsoap.org/soap/envelope/",
-        prefix = "soapenv"
-    )]
-    pub struct LogoutSoapInSoapEnvelope {
-        #[yaserde(rename = "encodingStyle", prefix = "soapenv", attribute)]
-        pub encoding_style: String,
-        #[yaserde(rename = "tns", prefix = "xmlns", attribute)]
-        pub tnsattr: Option<String>,
-        #[yaserde(rename = "urn", prefix = "xmlns", attribute)]
-        pub urnattr: Option<String>,
-        #[yaserde(rename = "xsi", prefix = "xmlns", attribute)]
-        pub xsiattr: Option<String>,
-        #[yaserde(rename = "Header", prefix = "soapenv")]
-        pub header: Option<Header>,
-        #[yaserde(rename = "Body", prefix = "soapenv")]
-        pub body: SoapLogoutSoapIn,
-    }
-
-    impl LogoutSoapInSoapEnvelope {
-        pub fn new(body: SoapLogoutSoapIn) -> Self {
-            LogoutSoapInSoapEnvelope {
-                encoding_style: SOAP_ENCODING.to_string(),
-                tnsattr: Option::Some("http://www.aed-sicad.de/namespaces/svr".to_string()),
-                body,
-                urnattr: None,
-                xsiattr: None,
-                header: None,
-            }
-        }
-    }
-
-    #[derive(Debug, Default, YaSerialize, YaDeserialize)]
-    pub struct SoapLogoutSoapOut {
-        #[yaserde(rename = "LogoutSoapOut", default)]
-        pub body: ports::LogoutSoapOut,
-        #[yaserde(rename = "Fault", default)]
-        pub fault: Option<SoapFault>,
-    }
-    #[derive(Debug, Default, YaSerialize, YaDeserialize)]
-    #[yaserde(
-        rename = "Envelope",
-        namespace = "soapenv: http://schemas.xmlsoap.org/soap/envelope/",
-        prefix = "soapenv"
-    )]
-    pub struct LogoutSoapOutSoapEnvelope {
-        #[yaserde(rename = "encodingStyle", prefix = "soapenv", attribute)]
-        pub encoding_style: String,
-        #[yaserde(rename = "tns", prefix = "xmlns", attribute)]
-        pub tnsattr: Option<String>,
-        #[yaserde(rename = "urn", prefix = "xmlns", attribute)]
-        pub urnattr: Option<String>,
-        #[yaserde(rename = "xsi", prefix = "xmlns", attribute)]
-        pub xsiattr: Option<String>,
-        #[yaserde(rename = "Header", prefix = "soapenv")]
-        pub header: Option<Header>,
-        #[yaserde(rename = "Body", prefix = "soapenv")]
-        pub body: SoapLogoutSoapOut,
-    }
-
-    impl LogoutSoapOutSoapEnvelope {
-        pub fn new(body: SoapLogoutSoapOut) -> Self {
-            LogoutSoapOutSoapEnvelope {
-                encoding_style: SOAP_ENCODING.to_string(),
-                tnsattr: Option::Some("http://www.aed-sicad.de/namespaces/svr".to_string()),
-                body,
-                urnattr: None,
-                xsiattr: None,
-                header: None,
-            }
-        }
-    }
-
-
-    impl Default for AuftragsManagerSoap {
-        fn default() -> Self {
-            AuftragsManagerSoap {
-                client: reqwest::Client::new(),
-                url: "http://www.aed-sicad.de/namespaces/svr".to_string(),
-                credentials: Option::None,
-            }
-        }
-    }
-    impl AuftragsManagerSoap {
-        pub fn new(url: &str, credentials: Option<(String, String)>) -> Self {
-            AuftragsManagerSoap {
-                client: reqwest::Client::new(),
-                url: url.to_string(),
-                credentials,
-            }
-        }
-    }
-
-    #[derive(Clone)]
-    pub struct AuftragsManagerSoap {
-        client: reqwest::Client,
-        url: String,
-        credentials: Option<(String, String)>,
-    }
-
-    #[async_trait]
-    impl ports::AuftragsManagerSoap for AuftragsManagerSoap {
-        async fn get_version(
-            &self,
-            get_version_soap_in: ports::GetVersionSoapIn,
-        ) -> Result<ports::GetVersionSoapOut, Option<SoapFault>> {
-            let __request = GetVersionSoapInSoapEnvelope::new(SoapGetVersionSoapIn {
-                body: get_version_soap_in,
-                xmlns: Option::Some("http://www.aed-sicad.de/namespaces/svr".to_string()),
-            });
-
-            let (status, response) = self
-                .send_soap_request(
-                    &__request,
-                    "http://www.aed-sicad.de/namespaces/svr/GetVersion",
-                )
-                .await
-                .map_err(|err| {
-                    println!("Failed to send SOAP request: {:?}", err);
-                    None
-                })?;
-
-            println!("response: {}", response);
-
-            let r: GetVersionSoapOutSoapEnvelope = from_str(&response).map_err(|err| {
-                println!("Failed to unmarshal SOAP response: {:?}", err);
-                None
-            })?;
-            if status.is_success() {
-                Ok(r.body.body)
-            } else {
-                Err(r.body.fault)
-            }
-        }
-        async fn get_schema_version(
-            &self,
-            get_schema_version_soap_in: ports::GetSchemaVersionSoapIn,
-        ) -> Result<ports::GetSchemaVersionSoapOut, Option<SoapFault>> {
-            let __request = GetSchemaVersionSoapInSoapEnvelope::new(SoapGetSchemaVersionSoapIn {
-                body: get_schema_version_soap_in,
-                xmlns: Option::Some("http://www.aed-sicad.de/namespaces/svr".to_string()),
-            });
-
-            let (status, response) = self
-                .send_soap_request(
-                    &__request,
-                    "http://www.aed-sicad.de/namespaces/svr/GetSchemaVersion",
-                )
-                .await
-                .map_err(|err| {
-                    warn!("Failed to send SOAP request: {:?}", err);
-                    None
-                })?;
-
-            let r: GetSchemaVersionSoapOutSoapEnvelope = from_str(&response).map_err(|err| {
-                warn!("Failed to unmarshal SOAP response: {:?}", err);
-                None
-            })?;
-            if status.is_success() {
-                Ok(r.body.body)
-            } else {
-                Err(r.body.fault)
-            }
-        }
-        async fn login(
-            &self,
-            login_soap_in: ports::LoginSoapIn,
-        ) -> Result<ports::LoginSoapOut, Option<SoapFault>> {
-            let __request = LoginSoapInSoapEnvelope::new(SoapLoginSoapIn {
-                body: login_soap_in,
-                xmlns: Option::Some("http://www.aed-sicad.de/namespaces/svr".to_string()),
-            });
-
-            let (status, response) = self
-                .send_soap_request(&__request, "http://www.aed-sicad.de/namespaces/svr/Login")
-                .await
-                .map_err(|err| {
-                    warn!("Failed to send SOAP request: {:?}", err);
-                    None
-                })?;
-
-            let r: LoginSoapOutSoapEnvelope = from_str(&response).map_err(|err| {
-                warn!("Failed to unmarshal SOAP response: {:?}", err);
-                None
-            })?;
-            if status.is_success() {
-                Ok(r.body.body)
-            } else {
-                Err(r.body.fault)
-            }
-        }
-        async fn logout(
-            &self,
-            logout_soap_in: ports::LogoutSoapIn,
-        ) -> Result<ports::LogoutSoapOut, Option<SoapFault>> {
-            let __request = LogoutSoapInSoapEnvelope::new(SoapLogoutSoapIn {
-                body: logout_soap_in,
-                xmlns: Option::Some("http://www.aed-sicad.de/namespaces/svr".to_string()),
-            });
-
-            let (status, response) = self
-                .send_soap_request(&__request, "http://www.aed-sicad.de/namespaces/svr/Logout")
-                .await
-                .map_err(|err| {
-                    warn!("Failed to send SOAP request: {:?}", err);
-                    None
-                })?;
-
-            let r: LogoutSoapOutSoapEnvelope = from_str(&response).map_err(|err| {
-                warn!("Failed to unmarshal SOAP response: {:?}", err);
-                None
-            })?;
-            if status.is_success() {
-                Ok(r.body.body)
-            } else {
-                Err(r.body.fault)
-            }
-        }
-    }
+	    let capture = match LOGOUT.captures_iter(&response).nth(0) {
+	    	Some(s) => s,
+	    	None => return Err(RequestFailure::FailedToDeserializeResponse("Logout".to_string()))
+	    };
+	
+	    Ok(())
+	}
 }
 
+fn encode_gzip_base64(s: &str) -> Option<String> {
+   	use flate2::{write::GzEncoder, Compression};
+   	use std::io::Write;
 
-pub mod services {
-    use super::*;
-    use async_trait::async_trait;
-    use yaserde::de::from_str;
-    use yaserde::ser::to_string;
-    use yaserde::{YaDeserialize, YaSerialize};
-    
-    /// 3A Server AuftragsManagement web service.
-    pub struct AuftragsManager {}
+    let mut encoder = GzEncoder::new(Vec::new(), Compression::default());
+    encoder.write_all(s.as_bytes()).ok()?;
+    Some(base64::encode(&encoder.finish().ok()?))
+}
 
-    impl AuftragsManager {
-        pub fn new_client(url: &str, credentials: Option<(String, String)>) -> bindings::AuftragsManagerSoap {
-            bindings::AuftragsManagerSoap::new(url, credentials)
-        }
-    }
+#[derive(Debug, Clone, PartialEq)]
+pub struct FortfuehrungsAuftrag {
+	pub verfahren_name: String,
+	pub verfahren_id: usize,
+	pub insert: Vec<FfaInsert>,
+	pub replace: Vec<FfaReplace>,
+	pub delete: Vec<FfaDelete>,
+}
+
+// TODO
+#[derive(Debug, Clone, PartialEq)]
+pub enum FfaInsert {
+	Abteilung2 { uuid: String },
+	Abteilung3 { 
+		gml_oid: String, 
+		gml_oid_plus_eins: String,
+		kan: KennzeichnungAlterNeuerBestand, 
+		verfahren_oid: String, 
+		beguenstigter_rechtsinhaber_oid: String, 
+		lfd_nr: usize,
+		textlicher_teil: String,
+		aktionsstatus: AktionsStatus,
+		waehrung: Waehrung,
+		betrag: usize,
+		schuldenart: SchuldenArt,
+	},
+	BuchungsstelleBelastet { uuid: String },
+}
+
+// TODO
+#[derive(Debug, Clone, PartialEq)]
+pub enum FfaReplace {
+	Abteilung2 { uuid: String },
+	Abteilung3 { uuid: String },
+	BuchungsstelleBelastet { uuid: String },
+}
+
+#[derive(Debug, Clone, PartialEq)]
+pub enum FfaDelete {
+	Abteilung2 { uuid: String },
+	Abteilung3 { uuid: String },
+	BuchungsstelleBelastet { uuid: String },
+}
+
+#[derive(Debug, Clone, PartialEq)]
+pub enum KennzeichnungAlterNeuerBestand {
+	AlterBestand,
+	NeuerBestand,
+	Vorerfassung,
+	MigrationAlterBestand,
+}
+
+impl KennzeichnungAlterNeuerBestand {
+	pub fn code(&self) -> &'static str {
+		match self {
+			KennzeichnungAlterNeuerBestand::AlterBestand => "A",
+			KennzeichnungAlterNeuerBestand::NeuerBestand => "N",
+			KennzeichnungAlterNeuerBestand::Vorerfassung => "V",
+			KennzeichnungAlterNeuerBestand::MigrationAlterBestand => "M",
+		}
+	}
+}
+
+#[derive(Debug, Clone, PartialEq)]
+pub enum AktionsStatus {
+	AltesRechtIstZuLoeschen,
+	AltesRechtIstZuLoeschenUndNeuZuBegruenden,
+	NeuesRecht,
+	UebertragenInDenNeuenBestand,
+}
+
+impl AktionsStatus {
+	pub fn code(&self) -> usize {
+		match self {
+			AktionsStatus::AltesRechtIstZuLoeschen => 1001,
+			AktionsStatus::AltesRechtIstZuLoeschenUndNeuZuBegruenden => 1002,
+			AktionsStatus::NeuesRecht => 1003,
+			AktionsStatus::UebertragenInDenNeuenBestand => 1000,
+		}
+	}
+}
+
+impl FortfuehrungsAuftrag {
+	pub fn get_xml(&self) -> String {
+		use chrono::Utc;
+
+		let delete = self.delete.iter().map(|d| {
+			match d {
+				FfaDelete::Abteilung2 { uuid } => {
+					format!("
+						<wfs:Delete typeName=\"LX_Abteilung2\">
+							<ogc:Filter>
+							  	<ogc:FeatureId fid=\"{uuid}\" />
+							</ogc:Filter>
+						</wfs:Delete>
+					", uuid = uuid)
+				},
+				FfaDelete::Abteilung3 { uuid } => {
+					format!("
+						<wfs:Delete typeName=\"LX_Abteilung3\">
+							<ogc:Filter>
+								<ogc:FeatureId fid=\"{uuid}\" />
+							</ogc:Filter>
+						</wfs:Delete>
+					", uuid = uuid)
+				},
+				FfaDelete::BuchungsstelleBelastet { uuid } => {
+					format!("
+						<wfs:Delete typeName=\"LX_BuchungsstelleBelastet\">
+							<ogc:Filter>
+							  <ogc:FeatureId fid=\"{uuid}\" />
+							</ogc:Filter>
+						</wfs:Delete>
+					", uuid = uuid)
+				}
+			}
+		}).collect::<Vec<_>>().join("\r\n");
+
+		let insert = self.insert.iter().map(|i| {
+			match i {
+				FfaInsert::Abteilung3 { 
+					gml_oid, 
+					gml_oid_plus_eins,
+					kan, 
+					verfahren_oid, 
+					beguenstigter_rechtsinhaber_oid, 
+					lfd_nr,
+					textlicher_teil,
+					aktionsstatus,
+					waehrung,
+					betrag,
+					schuldenart,
+				} => {
+					format!("
+			        <lefis:LX_Abteilung3 gml:id=\"{gml_oid}\">
+			          <gml:identifier codeSpace=\"http://www.adv-online.de/\">urn:adv:oid:{gml_oid}</gml:identifier>
+			          <lebenszeitintervall>
+			            <AA_Lebenszeitintervall>
+			              <beginnt>{datum_jetzt}</beginnt>
+			            </AA_Lebenszeitintervall>
+			          </lebenszeitintervall>
+			          <modellart>
+			            <AA_Modellart>
+			              <sonstigesModell>LEFIS</sonstigesModell>
+			            </AA_Modellart>
+			          </modellart>
+			          <lefis:kan>{kan}</lefis:kan>
+			          <lefis:gehoertZuVerfahren xlink:href=\"urn:adv:oid:{verfahren_oid}\" />
+			          <lefis:unterliegtDemNachtrag>false</lefis:unterliegtDemNachtrag>
+			          <lefis:unterliegtEinerPlantextziffer>true</lefis:unterliegtEinerPlantextziffer>
+			          <lefis:kopierVorgangErfolgt>false</lefis:kopierVorgangErfolgt>
+			          <lefis:beguenstigterRechtsinhaber xlink:href=\"urn:adv:oid:{beguenstigter_rechtsinhaber_oid}\" />
+			          <lefis:beziehtSichAuf3 xlink:href=\"urn:adv:oid:{gml_oid_plus_eins}\" />
+			          <lefis:lfdNr>{lfd_nr}</lefis:lfdNr>
+			          <lefis:textlicherTeil>{textlicher_teil}</lefis:textlicherTeil>
+			          <lefis:aktionsStatus>{aktionsstatus}</lefis:aktionsStatus>
+			          <lefis:betrag>
+			            <lefis:Waehrung uom=\"urn:lefis:uom:currency:{waehrung}\">{betrag}</lefis:Waehrung>
+			          </lefis:betrag>
+			          <lefis:rechteArt>{schuldenart}</lefis:rechteArt>
+			        </lefis:LX_Abteilung3>
+					", 
+					gml_oid = gml_oid,
+					kan = kan.code(),
+					verfahren_oid = verfahren_oid,
+					beguenstigter_rechtsinhaber_oid = beguenstigter_rechtsinhaber_oid,
+					lfd_nr = lfd_nr,
+					textlicher_teil = textlicher_teil,
+					aktionsstatus = aktionsstatus.code(),
+					waehrung = waehrung.code(),
+					betrag = betrag,
+					schuldenart = schuldenart.code(),
+					datum_jetzt = Utc::now())
+				},
+				FfaInsert::Abteilung2 { .. } => {
+					format!("") // TODO
+				},
+				FfaInsert::BuchungsstelleBelastet { .. } => {
+					format!("") // TODO
+				}
+			}
+		}).collect::<Vec<_>>().join("\r\n");
+
+		format!("
+		<?xml version=\"1.0\" encoding=\"utf-8\"?>
+		<!--Die NAS-Datei wurde mit der FI-Version 6.4.3.19200 erstellt.-->
+		<AX_Fortfuehrungsauftrag xsi:schemaLocation=\"http://www.landentwicklung.de/namespaces/lefis/1.5 NAS-LEFIS-Operationen.xsd http://www.adv-online.de/namespaces/adv/gid/6.0 aaa.xsd\" xmlns=\"http://www.adv-online.de/namespaces/adv/gid/6.0\" xmlns:gsr=\"http://www.isotc211.org/2005/gsr\" xmlns:fc=\"http://www.adv-online.de/namespaces/adv/gid/fc/6.0\" xmlns:xsi=\"http://www.w3.org/2001/XMLSchema-instance\" xmlns:gml=\"http://www.opengis.net/gml/3.2\" xmlns:xlink=\"http://www.w3.org/1999/xlink\" xmlns:lefis=\"http://www.landentwicklung.de/namespaces/lefis/1.5\" xmlns:wfsext=\"http://www.adv-online.de/namespaces/adv/gid/wfsext\" xmlns:gco=\"http://www.isotc211.org/2005/gco\" xmlns:xs=\"http://www.w3.org/2001/XMLSchema\" xmlns:gts=\"http://www.isotc211.org/2005/gts\" xmlns:ogc=\"http://www.adv-online.de/namespaces/adv/gid/ogc\" xmlns:wfs=\"http://www.adv-online.de/namespaces/adv/gid/wfs\" xmlns:gmd=\"http://www.isotc211.org/2005/gmd\" xmlns:gss=\"http://www.isotc211.org/2005/gss\">
+			  <empfaenger>
+			    <AA_Empfaenger>
+			      <direkt>true</direkt>
+			    </AA_Empfaenger>
+			  </empfaenger>
+			  <ausgabeform>application/gzip</ausgabeform>
+			  <koordinatenangaben>
+			    <AA_Koordinatenreferenzsystemangaben>
+			      <crs xlink:href=\"urn:adv:crs:ETRS89_UTM33\" />
+			      <anzahlDerNachkommastellen>3</anzahlDerNachkommastellen>
+			      <standard>true</standard>
+			    </AA_Koordinatenreferenzsystemangaben>
+			  </koordinatenangaben>
+			  <geaenderteObjekte>
+			    <wfs:Transaction version=\"1.0.0\" service=\"WFS\">
+			      {delete}
+			      {replace}
+			      {insert}
+			    </wfs:Transaction>
+			  </geaenderteObjekte>
+			  <profilkennung>LEFIS Upload</profilkennung>
+			  <antragsnummer>{antragsnummer}</antragsnummer>
+			  <auftragsnummer>{auftragsnummer}</auftragsnummer>
+			  <impliziteLoeschungDerReservierung>4000</impliziteLoeschungDerReservierung>
+			  <verarbeitungsart>1000</verarbeitungsart>
+			  <geometriebehandlung>false</geometriebehandlung>
+			  <mitTemporaeremArbeitsbereich>false</mitTemporaeremArbeitsbereich>
+			  <mitObjektenImFortfuehrungsgebiet>false</mitObjektenImFortfuehrungsgebiet>
+			  <mitFortfuehrungsnachweis>false</mitFortfuehrungsnachweis>
+		  </AX_Fortfuehrungsauftrag>
+		", 
+		delete = delete, 
+		replace = "",
+		insert = if !insert.is_empty() { 
+			format!("<wfs:Insert>{}</wfs:Insert>", insert) 
+		} else { 
+			String::new() 
+		}, 
+		antragsnummer = self.verfahren_name, // Wilmersdorf-Weesow_...
+		auftragsnummer = format!("{:06}_0099", self.verfahren_id)) // 500108_005
+
+		/*
+	      <wfs:Insert>
+	        <lefis:LX_Abteilung3 gml:id=\"DE_0000000000001\">
+	          <gml:identifier codeSpace=\"http://www.adv-online.de/\">urn:adv:oid:DE_0000000000001</gml:identifier>
+	          <lebenszeitintervall>
+	            <AA_Lebenszeitintervall>
+	              <beginnt>2021-12-17T09:12:25Z</beginnt>
+	            </AA_Lebenszeitintervall>
+	          </lebenszeitintervall>
+	          <modellart>
+	            <AA_Modellart>
+	              <sonstigesModell>LEFIS</sonstigesModell>
+	            </AA_Modellart>
+	          </modellart>
+	          <lefis:kan>A</lefis:kan>
+	          <lefis:gehoertZuVerfahren xlink:href=\"urn:adv:oid:DEBBLX99vz00003m\" />
+	          <lefis:unterliegtDemNachtrag>false</lefis:unterliegtDemNachtrag>
+	          <lefis:unterliegtEinerPlantextziffer>true</lefis:unterliegtEinerPlantextziffer>
+	          <lefis:kopierVorgangErfolgt>false</lefis:kopierVorgangErfolgt>
+	          <lefis:beguenstigterRechtsinhaber xlink:href=\"urn:adv:oid:DEBBLX991EW000az\" />
+	          <lefis:beziehtSichAuf3 xlink:href=\"urn:adv:oid:DE_0000000000002\" />
+	          <lefis:lfdNr>1</lefis:lfdNr>
+	          <lefis:textlicherTeil>TEST ABTEILUNG DREI BITTE LOESCHEN</lefis:textlicherTeil>
+	          <lefis:aktionsStatus>1000</lefis:aktionsStatus>
+	          <lefis:betrag>
+	            <lefis:Waehrung uom=\"urn:lefis:uom:currency:EUR\">10</lefis:Waehrung>
+	          </lefis:betrag>
+	          <lefis:rechteArt>7010</lefis:rechteArt>
+	        </lefis:LX_Abteilung3>
+	        <lefis:LX_BuchungsstelleBelastet gml:id=\"DE_0000000000002\">
+	          <gml:identifier codeSpace=\"http://www.adv-online.de/\">urn:adv:oid:DE_0000000000002</gml:identifier>
+	          <lebenszeitintervall>
+	            <AA_Lebenszeitintervall>
+	              <beginnt>2021-12-17T09:14:35Z</beginnt>
+	            </AA_Lebenszeitintervall>
+	          </lebenszeitintervall>
+	          <modellart>
+	            <AA_Modellart>
+	              <sonstigesModell>LEFIS</sonstigesModell>
+	            </AA_Modellart>
+	          </modellart>
+	          <lefis:kan>A</lefis:kan>
+	          <lefis:gehoertZuVerfahren xlink:href=\"urn:adv:oid:DEBBLX99vz00003m\" />
+	          <lefis:unterliegtDemNachtrag>false</lefis:unterliegtDemNachtrag>
+	          <lefis:unterliegtEinerPlantextziffer>true</lefis:unterliegtEinerPlantextziffer>
+	          <lefis:kopierVorgangErfolgt>false</lefis:kopierVorgangErfolgt>
+	          <lefis:belastetDasGrundstueck xlink:href=\"urn:adv:oid:DEBBLX99vw000582\" />
+	          <lefis:anteil>
+	            <AX_Anteil>
+	              <zaehler>1</zaehler>
+	              <nenner>1</nenner>
+	            </AX_Anteil>
+	          </lefis:anteil>
+	        </lefis:LX_BuchungsstelleBelastet>
+	      </wfs:Insert>
+		*/
+
+	}
 }
