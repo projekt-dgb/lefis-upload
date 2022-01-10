@@ -23,11 +23,12 @@ pub mod wsdl;
 
 #[derive(Default)]
 pub struct AppData {
+    verfahren_filter: Option<String>,
     konfiguration: LefisUploadKonfiguration,
     lefis_info: Option<LefisInfo>,
     dhk_verbindung: Option<DhkVerbindung>,
     geladene_verfahren: GeladeneVerfahren,
-    ausgewaehltes_verfahren: Option<usize>,
+    ausgewaehltes_verfahren: Option<String>,
 }
 
 #[derive(Default, Clone, Debug)]
@@ -127,12 +128,19 @@ pub struct VerfahrenGeladen {
     pub uuid: String,
     pub flurstuecke: Vec<AxFlurstueck>,
     // Achtung: Ein Gemarkungsname kann mehrere BBZ haben!
+    pub gemarkungen: BTreeMap<String, Vec<Gemarkung>>,
     pub buchungsblattbezirke: BTreeMap<String, Vec<BuchungsblattBezirk>>,
     pub grundbuchblaetter: Vec<LxBuchungsblattBodenordnung>,
     pub abt2_rechte: Vec<LxAbteilung2>,
     pub abt3_rechte: Vec<LxAbteilung3>,
     pub auftragsstatus: Option<Auftragsstatus>,
     pub lefis_geladen: Option<Vec<LefisDatei>>,
+}
+
+#[derive(Default, Debug, Clone, PartialEq)]
+pub struct Gemarkung {
+    pub lan19: usize,
+    pub gmn19: usize,
 }
 
 #[derive(Default, Debug, Clone, PartialEq)]
@@ -587,7 +595,20 @@ impl AktionsStatus {
 impl RechteArt {
     pub fn get_aktionsstatus(&self) -> AktionsStatus {
         match self {
-            _ => AktionsStatus::AltesRechtIstZuLoeschen // TODO
+            // Leitungsrechte: zu löschen u. neu
+            RechteArt::LeitungsOderAnlagenrecht |
+            RechteArt::Abwasserleitungsrecht |
+            RechteArt::Durchleitungsrecht |
+            RechteArt::GasleitungGasreglerstationFerngasltg |
+            RechteArt::Hochspannungsleitungsrecht => AktionsStatus::AltesRechtIstZuLoeschenUndNeuZuBegruenden,
+
+            // Wegerecht: zu löschen
+            RechteArt::GehWegeFahrOderLeitungsrecht |
+            RechteArt::Verfuegungsverbot
+            => AktionsStatus::AltesRechtIstZuLoeschen,
+
+            // Alles andere: zu übertragen
+            _ => AktionsStatus::UebertragenInDenNeuenBestand // TODO
         }
     }
 }
@@ -595,7 +616,7 @@ impl RechteArt {
 impl SchuldenArt {
     pub fn get_aktionsstatus(&self) -> AktionsStatus {
         match self {
-            _ => AktionsStatus::AltesRechtIstZuLoeschen // TODO
+            _ => AktionsStatus::UebertragenInDenNeuenBestand
         }
     }
 
@@ -939,6 +960,29 @@ impl DhkVerbindung {
                 }
             }
             
+            // wähle alle AxGemarkung aus, um den Namen der Gemarkungen zu erhalten
+            let query_ax_gemarkungen = format!("SELECT LAN19, GMN19, BEZ FROM {schema}.AX73007");
+            
+            let mut stmt = self.conn.prepare(&query_ax_gemarkungen, &[StmtParam::FetchArraySize(10000)])
+            .map_err(|e| {
+                format!("FEHLER in conn.prepare(\"{}\"): {}", query_ax_gemarkungen, e)
+            })?;
+
+            let mut ax_gemarkungen_reverse_map = BTreeMap::new();
+            let mut ax_gemarkungen_map = BTreeMap::new();
+            if let Ok(rr) = stmt.query_as::<(usize, usize, String)>(&[]) {
+                for r in rr.into_iter().filter_map(|o| o.ok()) {
+                    ax_gemarkungen_map.insert((r.0.clone(), r.1.clone()), r.2.clone());
+                    ax_gemarkungen_reverse_map
+                        .entry(r.2)
+                        .or_insert_with(|| Vec::new())
+                        .push(Gemarkung {
+                            lan19: r.0,
+                            gmn19: r.1,
+                        });
+                }
+            }
+
             // alle LX_BuchungsblattBodenordnung laden mit Verfahrens-ID und joinen mit AX_Buchungsblatt
             let query_grundbuchblattbezirke = format!("
                 SELECT a.UUID, a.LX91003, a.KAN, a.AX21007, b.LAN16, b.BBB, b.BBN, b.BLT 
@@ -1227,21 +1271,30 @@ impl DhkVerbindung {
             let mut verfahren_in_tabelle = rr
             .into_iter()
             .filter_map(|r| r.ok())
-            .map(|(vnr, vkbz, vnam, uuid)| VerfahrenGeladen {
-                ui: UiState::default(),
-                nummer: vnr,
-                name: if vnam.is_empty() { vkbz } else { vnam },
-                dhk_verbindung: schema.clone(),
-                uuid: uuid.clone(),
+            .map(|(vnr, vkbz, vnam, uuid)| {
 
-                flurstuecke: flurstuecke_map.get(&uuid).cloned().unwrap_or_default(),
-                buchungsblattbezirke: ax_buchungsblattbezirke_reverse_map.clone(),
-                grundbuchblaetter: buchungsblatt_bodenordnung_map.get(&uuid).cloned().unwrap_or_default(),
-                abt2_rechte: abteilung2_rechte_in_schema_map.get(&uuid).cloned().unwrap_or_default(),
-                abt3_rechte: abteilung3_rechte_in_schema_map.get(&uuid).cloned().unwrap_or_default(),
+                let grundbuchblaetter = buchungsblatt_bodenordnung_map.get(&uuid).cloned().unwrap_or_default();
+                let a2 = abteilung2_rechte_in_schema_map.get(&uuid).cloned().unwrap_or_default();
+                let a3 = abteilung3_rechte_in_schema_map.get(&uuid).cloned().unwrap_or_default();
 
-                auftragsstatus: None,
-                lefis_geladen: None,
+                VerfahrenGeladen {
+                    ui: UiState::default(),
+                    nummer: vnr,
+                    name: if vnam.is_empty() { vkbz } else { vnam },
+                    dhk_verbindung: schema.clone(),
+                    uuid: uuid.clone(),
+
+                    flurstuecke: flurstuecke_map.get(&uuid).cloned().unwrap_or_default(),
+                    gemarkungen: ax_gemarkungen_reverse_map.clone(),
+                    grundbuchblaetter: grundbuchblaetter,
+                    buchungsblattbezirke: ax_buchungsblattbezirke_reverse_map.clone(),
+
+                    abt2_rechte: a2,
+                    abt3_rechte: a3,
+
+                    auftragsstatus: None,
+                    lefis_geladen: None,
+                }
             })
             .collect::<Vec<_>>();
 
@@ -1315,6 +1368,7 @@ fn main() {
     }).unwrap_or_default();
 
     let app = App::new(RefAny::new(AppData {
+        verfahren_filter: None,
         konfiguration,
         lefis_info: db,
         dhk_verbindung,

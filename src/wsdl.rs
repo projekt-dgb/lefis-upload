@@ -577,48 +577,60 @@ pub struct FortfuehrungsAuftrag {
 }
 
 #[derive(Debug, Clone, PartialEq)]
+pub struct FfaLxAbteilung2 {
+	pub neue_uuid: String,
+	pub beginn_datum: DateTime<Utc>,
+	pub kan: KennzeichnungAlterNeuerBestand,
+	pub verfahren_uuid: String,
+	pub rechtsinhaber: Vec<String>,
+	pub buchungsstelle_uuid: String,
+	pub lfd_nr: usize,
+	pub textlicher_teil: String,
+	pub rechteart: RechteArt,
+	pub rangvermerk: String,
+}
+
+#[derive(Debug, Clone, PartialEq)]
+pub struct FfaLxAbteilung3 {
+	pub neue_uuid: String,
+	pub beginn_datum: DateTime<Utc>,
+	pub kan: KennzeichnungAlterNeuerBestand, 
+	pub verfahren_uuid: String, 
+	pub rechtsinhaber: Vec<String>,
+	pub buchungsstelle_uuid: String,
+	pub lfd_nr: usize,
+	pub textlicher_teil: String,
+	pub waehrung: Waehrung,
+	pub betrag: String,
+	pub schuldenart: SchuldenArt,
+}
+
+#[derive(Debug, Clone, PartialEq)]
+pub struct FfaLxBuchungsstelleBelastetAbt2 {
+	pub neue_buchungsstelle_uuid: String,
+	pub beginn_datum: DateTime<Utc>,
+	pub kan: KennzeichnungAlterNeuerBestand,
+	pub verfahren_uuid: String,
+	pub grundstuecke_belastet: Vec<String>,
+	pub anteil_belastet_zaehler: usize,
+	pub anteil_belastet_nenner: usize,
+}
+
+#[derive(Debug, Clone, PartialEq)]
+pub struct FfaLxBuchungsstelleBelastetAbt3 {
+	pub neue_buchungsstelle_uuid: String,
+	pub beginn_datum: DateTime<Utc>,
+	pub kan: KennzeichnungAlterNeuerBestand,
+	pub verfahren_uuid: String,
+	pub grundstuecke_belastet: Vec<String>,
+}
+
+#[derive(Debug, Clone, PartialEq)]
 pub enum FfaInsert {
-	Abteilung2 {
-		neue_uuid: String,
-		beginn_datum: DateTime<Utc>,
-		kan: KennzeichnungAlterNeuerBestand,
-		verfahren_uuid: String,
-		rechtsinhaber: Vec<String>,
-		buchungsstelle_uuid: String,
-		lfd_nr: usize,
-		textlicher_teil: String,
-		rechteart: RechteArt,
-		rangvermerk: String,
-	},
-	Abteilung3 {
-		neue_uuid: String,
-		beginn_datum: DateTime<Utc>,
-		kan: KennzeichnungAlterNeuerBestand, 
-		verfahren_uuid: String, 
-		rechtsinhaber: Vec<String>,
-		buchungsstelle_uuid: String,
-		lfd_nr: usize,
-		textlicher_teil: String,
-		waehrung: Waehrung,
-		betrag: String,
-		schuldenart: SchuldenArt,
-	},
-	BuchungsstelleBelastetAbt2 { 
-		neue_buchungsstelle_uuid: String,
-		beginn_datum: DateTime<Utc>,
-		kan: KennzeichnungAlterNeuerBestand,
-		verfahren_uuid: String,
-		grundstuecke_belastet: Vec<String>,
-		anteil_belastet_zaehler: usize,
-		anteil_belastet_nenner: usize,
-	},
-	BuchungsstelleBelastetAbt3 { 
-		neue_buchungsstelle_uuid: String,
-		beginn_datum: DateTime<Utc>,
-		kan: KennzeichnungAlterNeuerBestand,
-		verfahren_uuid: String,
-		grundstuecke_belastet: Vec<String>,
-	}
+	Abteilung2(FfaLxAbteilung2),
+	Abteilung3(FfaLxAbteilung3),
+	BuchungsstelleBelastetAbt2(FfaLxBuchungsstelleBelastetAbt2),
+	BuchungsstelleBelastetAbt3(FfaLxBuchungsstelleBelastetAbt3),
 }
 
 #[derive(Debug, Clone, PartialEq)]
@@ -637,20 +649,27 @@ pub enum FfaDelete {
 	},
 }
 
-// TODO
 #[derive(Debug, Clone, PartialEq)]
 pub enum FfaReplace {
 	Abteilung2 { 
 		uuid: String, 
-		erstellt_am: DateTime<Utc>, 
+		erstellt_am: DateTime<Utc>,
+		insert: FfaLxAbteilung2,
 	},
 	Abteilung3 { 
 		uuid: String,
-		erstellt_am: DateTime<Utc>, 
+		erstellt_am: DateTime<Utc>,
+		insert: FfaLxAbteilung3,
 	},
-	BuchungsstelleBelastet { 
+	BuchungsstelleBelastetAbt2 { 
 		uuid: String,
 		erstellt_am: DateTime<Utc>,
+		insert: FfaLxBuchungsstelleBelastetAbt2,
+	},
+	BuchungsstelleBelastetAbt3 { 
+		uuid: String,
+		erstellt_am: DateTime<Utc>,
+		insert: FfaLxBuchungsstelleBelastetAbt3,
 	},
 }
 
@@ -702,10 +721,489 @@ impl AktionsStatus {
 	}
 }
 
-impl FortfuehrungsAuftrag {
+impl FfaLxAbteilung2 {
+	pub fn get_xml(&self) -> String {
+		use chrono::SecondsFormat;
+
+		let FfaLxAbteilung2 {
+			neue_uuid,
+			beginn_datum,
+			kan,
+			verfahren_uuid,
+			rechtsinhaber,
+			buchungsstelle_uuid,
+			lfd_nr,
+			textlicher_teil,
+			rechteart,
+			rangvermerk,
+		} = self;
+
+		format!("
+		<lefis:LX_Abteilung2 gml:id=\"{neue_uuid}\">
+		  <gml:identifier codeSpace=\"http://www.adv-online.de/\">urn:adv:oid:{neue_uuid}</gml:identifier>
+		  <lebenszeitintervall>
+		    <AA_Lebenszeitintervall>
+		      <beginnt>{beginn_datum}</beginnt>
+		    </AA_Lebenszeitintervall>
+		  </lebenszeitintervall>
+		  <modellart>
+		    <AA_Modellart>
+		      <sonstigesModell>LEFIS</sonstigesModell>
+		    </AA_Modellart>
+		  </modellart>
+		  <lefis:kan>{kan}</lefis:kan>
+		  <lefis:gehoertZuVerfahren xlink:href=\"urn:adv:oid:{verfahren_uuid}\" />
+		  <lefis:unterliegtDemNachtrag>false</lefis:unterliegtDemNachtrag>
+		  <lefis:unterliegtEinerPlantextziffer>true</lefis:unterliegtEinerPlantextziffer>
+		  <lefis:kopierVorgangErfolgt>false</lefis:kopierVorgangErfolgt>
+		  {rechtsinhaber}
+		  <lefis:beziehtSichAuf2 xlink:href=\"urn:adv:oid:{buchungsstelle_uuid}\" />
+		  <lefis:lfdNr>{lfd_nr}</lefis:lfdNr>
+		  <lefis:textlicherTeil>{textlicher_teil}</lefis:textlicherTeil>
+		  <lefis:rechteArt>{rechteart}</lefis:rechteArt>
+		  <lefis:aktionsStatus>{aktionsstatus}</lefis:aktionsStatus>
+		  <lefis:rangvermerk>{rangvermerk}</lefis:rangvermerk>
+		</lefis:LX_Abteilung2>
+		",
+	    neue_uuid = neue_uuid,
+	    beginn_datum = beginn_datum.to_rfc3339_opts(SecondsFormat::Secs, true),
+	    kan = kan.code(),
+	    verfahren_uuid = verfahren_uuid,
+		rechtsinhaber = rechtsinhaber.iter().map(|uuid| {
+			format!("<lefis:istRechtsinhaber xlink:href=\"urn:adv:oid:{}\" />", uuid)
+		}).collect::<Vec<_>>().join("\r\n"),
+		buchungsstelle_uuid = buchungsstelle_uuid,
+		lfd_nr = lfd_nr,
+		textlicher_teil = xml_clean_text(textlicher_teil.trim()),
+		rechteart = rechteart.code(),
+		aktionsstatus = rechteart.get_aktionsstatus().code(),
+		rangvermerk = rangvermerk.trim())
+	}
+}
+impl FfaLxAbteilung3 {
+	pub fn get_xml(&self) -> String {
+		use chrono::SecondsFormat;
+
+		let FfaLxAbteilung3 {
+			neue_uuid,
+			beginn_datum,
+			kan, 
+			verfahren_uuid, 
+			rechtsinhaber,
+			buchungsstelle_uuid,
+			lfd_nr,
+			textlicher_teil,
+			waehrung,
+			betrag,
+			schuldenart,
+		} = self;
+
+		format!("
+	        <lefis:LX_Abteilung3 gml:id=\"{neue_uuid}\">
+	          <gml:identifier codeSpace=\"http://www.adv-online.de/\">urn:adv:oid:{neue_uuid}</gml:identifier>
+	          <lebenszeitintervall>
+	            <AA_Lebenszeitintervall>
+	              <beginnt>{beginn_datum}</beginnt>
+	            </AA_Lebenszeitintervall>
+	          </lebenszeitintervall>
+	          <modellart>
+	            <AA_Modellart>
+	              <sonstigesModell>LEFIS</sonstigesModell>
+	            </AA_Modellart>
+	          </modellart>
+	          <lefis:kan>{kan}</lefis:kan>
+	          <lefis:gehoertZuVerfahren xlink:href=\"urn:adv:oid:{verfahren_uuid}\" />
+	          <lefis:unterliegtDemNachtrag>false</lefis:unterliegtDemNachtrag>
+	          <lefis:unterliegtEinerPlantextziffer>true</lefis:unterliegtEinerPlantextziffer>
+	          <lefis:kopierVorgangErfolgt>false</lefis:kopierVorgangErfolgt>
+	          {rechtsinhaber}
+	          <lefis:beziehtSichAuf3 xlink:href=\"urn:adv:oid:{buchungsstelle_uuid}\" />
+	          <lefis:lfdNr>{lfd_nr}</lefis:lfdNr>
+	          <lefis:textlicherTeil>{textlicher_teil}</lefis:textlicherTeil>
+	          <lefis:aktionsStatus>{aktionsstatus}</lefis:aktionsStatus>
+	          <lefis:betrag>
+	            <lefis:Waehrung uom=\"urn:lefis:uom:currency:{waehrung}\">{betrag}</lefis:Waehrung>
+	          </lefis:betrag>
+	          <lefis:rechteArt>{schuldenart}</lefis:rechteArt>
+	        </lefis:LX_Abteilung3>
+			", 
+			neue_uuid = neue_uuid,
+			beginn_datum = beginn_datum.to_rfc3339_opts(SecondsFormat::Secs, true),
+			kan = kan.code(),
+			verfahren_uuid = verfahren_uuid,
+			rechtsinhaber = rechtsinhaber.iter().map(|uuid| {
+				format!("<lefis:beguenstigterRechtsinhaber xlink:href=\"urn:adv:oid:{}\" />", uuid)
+			}).collect::<Vec<_>>().join("\r\n"),
+			buchungsstelle_uuid = buchungsstelle_uuid,
+			lfd_nr = lfd_nr,
+			textlicher_teil = xml_clean_text(textlicher_teil.trim()),
+			aktionsstatus = schuldenart.get_aktionsstatus().code(),
+			waehrung = waehrung.code(),
+			betrag = betrag,
+			schuldenart = schuldenart.code())
+	}
+}
+
+impl FfaLxBuchungsstelleBelastetAbt2 {
+	pub fn get_xml(&self) -> String {
+		use chrono::SecondsFormat;
+
+		let FfaLxBuchungsstelleBelastetAbt2 {
+			neue_buchungsstelle_uuid,
+			beginn_datum,
+			kan,
+			verfahren_uuid,
+			grundstuecke_belastet,
+			anteil_belastet_zaehler,
+			anteil_belastet_nenner,
+		} = self;
+
+		format!("
+			<lefis:LX_BuchungsstelleBelastet gml:id=\"{neue_buchungsstelle_uuid}\">
+			  <gml:identifier codeSpace=\"http://www.adv-online.de/\">urn:adv:oid:{neue_buchungsstelle_uuid}</gml:identifier>
+			  <lebenszeitintervall>
+			    <AA_Lebenszeitintervall>
+			      <beginnt>{beginn_datum}</beginnt>
+			    </AA_Lebenszeitintervall>
+			  </lebenszeitintervall>
+			  <modellart>
+			    <AA_Modellart>
+			      <sonstigesModell>LEFIS</sonstigesModell>
+			    </AA_Modellart>
+			  </modellart>
+			  <lefis:kan>{kan}</lefis:kan>
+			  <lefis:gehoertZuVerfahren xlink:href=\"urn:adv:oid:{verfahren_uuid}\" />
+			  <lefis:unterliegtDemNachtrag>false</lefis:unterliegtDemNachtrag>
+			  <lefis:unterliegtEinerPlantextziffer>true</lefis:unterliegtEinerPlantextziffer>
+			  <lefis:kopierVorgangErfolgt>false</lefis:kopierVorgangErfolgt>
+			  {grundstuecke_belastet}
+			  <lefis:anteil>
+			    <AX_Anteil>
+			      <zaehler>{anteil_belastet_zaehler}</zaehler>
+			      <nenner>{anteil_belastet_nenner}</nenner>
+			    </AX_Anteil>
+			  </lefis:anteil>
+			</lefis:LX_BuchungsstelleBelastet>
+		",
+			neue_buchungsstelle_uuid = neue_buchungsstelle_uuid,
+	    	beginn_datum = beginn_datum.to_rfc3339_opts(SecondsFormat::Secs, true),
+	    	kan = kan.code(),
+	    	verfahren_uuid = verfahren_uuid,
+	    	grundstuecke_belastet = grundstuecke_belastet.iter().map(|uuid| {
+	    		format!("<lefis:belastetDasGrundstueck xlink:href=\"urn:adv:oid:{}\" />", uuid)
+	    	}).collect::<Vec<_>>().join("\r\n"),
+	    	anteil_belastet_zaehler = anteil_belastet_zaehler,
+	    	anteil_belastet_nenner = anteil_belastet_nenner.clone().max(1),
+		)	
+	}
+}
+
+impl FfaLxBuchungsstelleBelastetAbt3 {
+	pub fn get_xml(&self) -> String {
+		use chrono::SecondsFormat;
+
+		let FfaLxBuchungsstelleBelastetAbt3 {
+			neue_buchungsstelle_uuid,
+			beginn_datum,
+			kan,
+			verfahren_uuid,
+			grundstuecke_belastet,
+		} = self;
+
+		format!("
+			<lefis:LX_BuchungsstelleBelastet gml:id=\"{neue_buchungsstelle_uuid}\">
+			  <gml:identifier codeSpace=\"http://www.adv-online.de/\">urn:adv:oid:{neue_buchungsstelle_uuid}</gml:identifier>
+			  <lebenszeitintervall>
+			    <AA_Lebenszeitintervall>
+			      <beginnt>{beginn_datum}</beginnt>
+			    </AA_Lebenszeitintervall>
+			  </lebenszeitintervall>
+			  <modellart>
+			    <AA_Modellart>
+			      <sonstigesModell>LEFIS</sonstigesModell>
+			    </AA_Modellart>
+			  </modellart>
+			  <lefis:kan>{kan}</lefis:kan>
+			  <lefis:gehoertZuVerfahren xlink:href=\"urn:adv:oid:{verfahren_uuid}\" />
+			  <lefis:unterliegtDemNachtrag>false</lefis:unterliegtDemNachtrag>
+			  <lefis:unterliegtEinerPlantextziffer>true</lefis:unterliegtEinerPlantextziffer>
+			  <lefis:kopierVorgangErfolgt>false</lefis:kopierVorgangErfolgt>
+			  {grundstuecke_belastet}
+			</lefis:LX_BuchungsstelleBelastet>
+		",
+			neue_buchungsstelle_uuid = neue_buchungsstelle_uuid,
+	    	beginn_datum = beginn_datum.to_rfc3339_opts(SecondsFormat::Secs, true),
+	    	kan = kan.code(),
+	    	verfahren_uuid = verfahren_uuid,
+	    	grundstuecke_belastet = grundstuecke_belastet.iter().map(|uuid| {
+	    		format!("<lefis:belastetDasGrundstueck xlink:href=\"urn:adv:oid:{}\" />", uuid)
+	    	}).collect::<Vec<_>>().join("\r\n"),
+		)
+	}
+}
+
+pub struct FfaLxOrdnungsNummer {
+	pub ordnungsnummer_bodenordnung_uuid: String,
+	pub ordnungsnummer_bodenordnung_beginnt: DateTime<Utc>,
+	pub kan: KennzeichnungAlterNeuerBestand,
+	pub verfahren_uuid: String,
+	pub grundbucheigentum: Vec<String>,
+	pub stammnummer: usize,
+	pub unternummer: usize,
+}
+
+impl FfaLxOrdnungsNummer {
 	pub fn get_xml(&self) -> String {
 		
-		use chrono::SecondsFormat;
+		let lx_ordnungsnummer_bodenordnung = format!("
+			<lefis:LX_OrdnungsnummerBodenordnung gml:id=\"DE_000000000001e\">
+			  <gml:identifier codeSpace=\"http://www.adv-online.de/\">urn:adv:oid:DE_000000000001e</gml:identifier>
+			  <lebenszeitintervall>
+			    <AA_Lebenszeitintervall>
+			      <beginnt>2022-01-07T12:11:46Z</beginnt>
+			    </AA_Lebenszeitintervall>
+			  </lebenszeitintervall>
+			  <modellart>
+			    <AA_Modellart>
+			      <sonstigesModell>LEFIS</sonstigesModell>
+			    </AA_Modellart>
+			  </modellart>
+			  <lefis:kan>A</lefis:kan>
+			  <lefis:gehoertZuVerfahren xlink:href=\"urn:adv:oid:DEBBLX99vz00003m\" />
+			  <lefis:unterliegtDemNachtrag>false</lefis:unterliegtDemNachtrag>
+			  <lefis:unterliegtEinerPlantextziffer>true</lefis:unterliegtEinerPlantextziffer>
+			  <lefis:kopierVorgangErfolgt>false</lefis:kopierVorgangErfolgt>
+			  <lefis:hatGrundbucheigentum xlink:href=\"urn:adv:oid:DE_000000000001j\" />
+			  <lefis:anspruchsWert>0</lefis:anspruchsWert>
+			  <lefis:einlageWert>0</lefis:einlageWert>
+			  <lefis:ordnungsnummer>
+			    <lefis:LX_Ordnungsnummer>
+			      <lefis:stammnummer>701116</lefis:stammnummer>
+			      <lefis:unternummer>0</lefis:unternummer>
+			      <lefis:rechtsverhaeltnis>0</lefis:rechtsverhaeltnis>
+			    </lefis:LX_Ordnungsnummer>
+			  </lefis:ordnungsnummer>
+			  <lefis:rechtsbehelf>9999</lefis:rechtsbehelf>
+			  <lefis:ansprechpartner>(Nachname, Vorname)</lefis:ansprechpartner>
+			  <lefis:funktion>9999</lefis:funktion>
+			</lefis:LX_OrdnungsnummerBodenordnung>
+		");
+
+		let personenrolle = format!("
+			<lefis:LX_PersonRolle gml:id=\"DE_000000000001f\">
+			  <gml:identifier codeSpace=\"http://www.adv-online.de/\">urn:adv:oid:DE_000000000001f</gml:identifier>
+			  <lebenszeitintervall>
+			    <AA_Lebenszeitintervall>
+			      <beginnt>2022-01-07T12:11:47Z</beginnt>
+			    </AA_Lebenszeitintervall>
+			  </lebenszeitintervall>
+			  <modellart>
+			    <AA_Modellart>
+			      <sonstigesModell>LEFIS</sonstigesModell>
+			    </AA_Modellart>
+			  </modellart>
+			  <lefis:kan>A</lefis:kan>
+			  <lefis:gehoertZuVerfahren xlink:href=\"urn:adv:oid:DEBBLX99vz00003m\" />
+			  <lefis:unterliegtDemNachtrag>false</lefis:unterliegtDemNachtrag>
+			  <lefis:unterliegtEinerPlantextziffer>true</lefis:unterliegtEinerPlantextziffer>
+			  <lefis:kopierVorgangErfolgt>false</lefis:kopierVorgangErfolgt>
+			  <lefis:artDerEntstehung>1003</lefis:artDerEntstehung>
+			  <lefis:bearbeitungsStatus>true</lefis:bearbeitungsStatus>
+			  <lefis:legitimationsgrundlage>1060</lefis:legitimationsgrundlage>
+			  <lefis:laden>true</lefis:laden>
+			  <lefis:zahlungspflichtigNach19>false</lefis:zahlungspflichtigNach19>
+			  <lefis:zahlungspflichtigFestsetzungen>false</lefis:zahlungspflichtigFestsetzungen>
+			</lefis:LX_PersonRolle>
+		");
+
+		let lx_person = format!("
+			<lefis:LX_Person gml:id=\"DE_000000000001g\">
+			  <gml:identifier codeSpace=\"http://www.adv-online.de/\">urn:adv:oid:DE_000000000001g</gml:identifier>
+			  <lebenszeitintervall>
+			    <AA_Lebenszeitintervall>
+			      <beginnt>2022-01-07T12:12:17Z</beginnt>
+			    </AA_Lebenszeitintervall>
+			  </lebenszeitintervall>
+			  <modellart>
+			    <AA_Modellart>
+			      <sonstigesModell>LEFIS</sonstigesModell>
+			    </AA_Modellart>
+			  </modellart>
+			  <lefis:kan>A</lefis:kan>
+			  <lefis:gehoertZuVerfahren xlink:href=\"urn:adv:oid:DEBBLX99vz00003m\" />
+			  <lefis:unterliegtDemNachtrag>false</lefis:unterliegtDemNachtrag>
+			  <lefis:unterliegtEinerPlantextziffer>true</lefis:unterliegtEinerPlantextziffer>
+			  <lefis:kopierVorgangErfolgt>false</lefis:kopierVorgangErfolgt>
+			  <lefis:hatEine xlink:href=\"urn:adv:oid:DE_000000000001f\" />
+			  <lefis:ergaenzt xlink:href=\"urn:adv:oid:DE_000000000001h\" />
+			</lefis:LX_Person>
+		");
+
+		let ax_person = format!("
+			<AX_Person gml:id=\"DE_000000000001h\">
+			  <gml:identifier codeSpace=\"http://www.adv-online.de/\">urn:adv:oid:DE_000000000001h</gml:identifier>
+			  <lebenszeitintervall>
+			    <AA_Lebenszeitintervall>
+			      <beginnt>2022-01-07T12:12:18Z</beginnt>
+			    </AA_Lebenszeitintervall>
+			  </lebenszeitintervall>
+			  <modellart>
+			    <AA_Modellart>
+			      <advStandardModell>DLKM</advStandardModell>
+			    </AA_Modellart>
+			  </modellart>
+			  <modellart>
+			    <AA_Modellart>
+			      <sonstigesModell>LEFIS</sonstigesModell>
+			    </AA_Modellart>
+			  </modellart>
+			  <nachnameOderFirma>Nachname</nachnameOderFirma>
+			  <anrede>1000</anrede>
+			  <vorname>Vorname</vorname>
+			  <namensbestandteil>Titel</namensbestandteil>
+			  <geburtsname>Geburtsname</geburtsname>
+			  <wohnortOderSitz>Wohnort</wohnortOderSitz>
+			  <qualitaetsangaben>
+			    <AX_DQOhneDatenerhebung>
+			      <herkunft>
+			        <gmd:LI_Lineage>
+			          <gmd:processStep>
+			            <gmd:LI_ProcessStep>
+			              <gmd:description>
+			                <AX_LI_ProcessStep_MitDatenerhebung_Description>Erhebung</AX_LI_ProcessStep_MitDatenerhebung_Description>
+			              </gmd:description>
+			              <gmd:dateTime>
+			                <gco:DateTime>2022-01-07T12:12:18Z</gco:DateTime>
+			              </gmd:dateTime>
+			              <gmd:processor>
+			                <gmd:CI_ResponsibleParty>
+			                  <gmd:organisationName>
+			                    <gco:CharacterString>Flurbereinigungsbehörde</gco:CharacterString>
+			                  </gmd:organisationName>
+			                  <gmd:role>
+			                    <gmd:CI_RoleCode codeList=\"http://www.isotc211.org/2005/resources/CodeList/gmxCodelists.xml#CI_RoleCode\" codeListValue=\"http://www.isotc211.org/2005/resources/CodeList/gmxCodelists.xml#CI_RoleCode_processor\">processor</gmd:CI_RoleCode>
+			                  </gmd:role>
+			                </gmd:CI_ResponsibleParty>
+			              </gmd:processor>
+			            </gmd:LI_ProcessStep>
+			          </gmd:processStep>
+			        </gmd:LI_Lineage>
+			      </herkunft>
+			    </AX_DQOhneDatenerhebung>
+			  </qualitaetsangaben>
+			  <zeigtAuf xlink:href=\"urn:adv:oid:DE_000000000001h\" />
+			</AX_Person>
+		");
+
+		let buchungsblatt = format!("
+			<AX_Buchungsblatt gml:id=\"DE_000000000001i\">
+			  <gml:identifier codeSpace=\"http://www.adv-online.de/\">urn:adv:oid:DE_000000000001i</gml:identifier>
+			  <lebenszeitintervall>
+			    <AA_Lebenszeitintervall>
+			      <beginnt>2022-01-07T12:13:51Z</beginnt>
+			    </AA_Lebenszeitintervall>
+			  </lebenszeitintervall>
+			  <modellart>
+			    <AA_Modellart>
+			      <advStandardModell>DLKM</advStandardModell>
+			    </AA_Modellart>
+			  </modellart>
+			  <modellart>
+			    <AA_Modellart>
+			      <sonstigesModell>LEFIS</sonstigesModell>
+			    </AA_Modellart>
+			  </modellart>
+			  <buchungsblattkennzeichen>121607v000001</buchungsblattkennzeichen>
+			  <buchungsblattbezirk>
+			    <AX_Buchungsblattbezirk_Schluessel>
+			      <land>12</land>
+			      <bezirk>1607</bezirk>
+			    </AX_Buchungsblattbezirk_Schluessel>
+			  </buchungsblattbezirk>
+			  <buchungsblattnummerMitBuchstabenerweiterung>v000001</buchungsblattnummerMitBuchstabenerweiterung>
+			  <blattart>5000</blattart>
+			</AX_Buchungsblatt>
+		");
+
+		let lx_buchungsblatt_bodenordnung = format!("
+			<lefis:LX_BuchungsblattBodenordnung gml:id=\"DE_000000000001j\">
+			  <gml:identifier codeSpace=\"http://www.adv-online.de/\">urn:adv:oid:DE_000000000001j</gml:identifier>
+			  <lebenszeitintervall>
+			    <AA_Lebenszeitintervall>
+			      <beginnt>2022-01-07T12:13:51Z</beginnt>
+			    </AA_Lebenszeitintervall>
+			  </lebenszeitintervall>
+			  <modellart>
+			    <AA_Modellart>
+			      <sonstigesModell>LEFIS</sonstigesModell>
+			    </AA_Modellart>
+			  </modellart>
+			  <lefis:kan>A</lefis:kan>
+			  <lefis:gehoertZuVerfahren xlink:href=\"urn:adv:oid:DEBBLX99vz00003m\" />
+			  <lefis:unterliegtDemNachtrag>false</lefis:unterliegtDemNachtrag>
+			  <lefis:unterliegtEinerPlantextziffer>true</lefis:unterliegtEinerPlantextziffer>
+			  <lefis:kopierVorgangErfolgt>false</lefis:kopierVorgangErfolgt>
+			  <lefis:ergaenzt xlink:href=\"urn:adv:oid:DE_000000000001i\" />
+			  <lefis:nebenbeteiligtenBlatt>true</lefis:nebenbeteiligtenBlatt>
+			  <lefis:grundbuchvergleichDurchgefuehrt>false</lefis:grundbuchvergleichDurchgefuehrt>
+			  <lefis:vollmigriertesGrundbuchblatt>false</lefis:vollmigriertesGrundbuchblatt>
+			</lefis:LX_BuchungsblattBodenordnung>
+		");
+
+		let ax_namensnummer = format!("
+			<AX_Namensnummer gml:id=\"DE_000000000001k\">
+			  <gml:identifier codeSpace=\"http://www.adv-online.de/\">urn:adv:oid:DE_000000000001k</gml:identifier>
+			  <lebenszeitintervall>
+			    <AA_Lebenszeitintervall>
+			      <beginnt>2022-01-07T12:13:52Z</beginnt>
+			    </AA_Lebenszeitintervall>
+			  </lebenszeitintervall>
+			  <modellart>
+			    <AA_Modellart>
+			      <advStandardModell>DLKM</advStandardModell>
+			    </AA_Modellart>
+			  </modellart>
+			  <modellart>
+			    <AA_Modellart>
+			      <sonstigesModell>LEFIS</sonstigesModell>
+			    </AA_Modellart>
+			  </modellart>
+			  <laufendeNummerNachDIN1421>0001.00.00.00.00</laufendeNummerNachDIN1421>
+			  <istBestandteilVon xlink:href=\"urn:adv:oid:DE_000000000001i\" />
+			  <benennt xlink:href=\"urn:adv:oid:DE_000000000001h\" />
+			</AX_Namensnummer>
+		");
+
+		let lx_namensnummer = format!("
+			<lefis:LX_Namensnummer gml:id=\"DE_000000000001l\">
+			  <gml:identifier codeSpace=\"http://www.adv-online.de/\">urn:adv:oid:DE_000000000001l</gml:identifier>
+			  <lebenszeitintervall>
+			    <AA_Lebenszeitintervall>
+			      <beginnt>2022-01-07T12:13:52Z</beginnt>
+			    </AA_Lebenszeitintervall>
+			  </lebenszeitintervall>
+			  <modellart>
+			    <AA_Modellart>
+			      <sonstigesModell>LEFIS</sonstigesModell>
+			    </AA_Modellart>
+			  </modellart>
+			  <lefis:kan>A</lefis:kan>
+			  <lefis:gehoertZuVerfahren xlink:href=\"urn:adv:oid:DEBBLX99vz00003m\" />
+			  <lefis:unterliegtDemNachtrag>false</lefis:unterliegtDemNachtrag>
+			  <lefis:unterliegtEinerPlantextziffer>true</lefis:unterliegtEinerPlantextziffer>
+			  <lefis:kopierVorgangErfolgt>false</lefis:kopierVorgangErfolgt>
+			  <lefis:hat xlink:href=\"urn:adv:oid:DE_000000000001f\" />
+			  <lefis:ergaenzt xlink:href=\"urn:adv:oid:DE_000000000001k\" />
+			</lefis:LX_Namensnummer>
+		");
+
+		format!("{lx_ordnungsnummer_bodenordnung}", 
+			lx_ordnungsnummer_bodenordnung = lx_ordnungsnummer_bodenordnung
+		)
+	}
+}
+impl FortfuehrungsAuftrag {
+	pub fn get_xml(&self) -> String {
 
 		let delete = self.delete.iter().map(|d| {
 			match d {
@@ -737,204 +1235,70 @@ impl FortfuehrungsAuftrag {
 			}
 		}).collect::<Vec<_>>().join("\r\n");
 
+
+		let replace = self.replace.iter().map(|i| {
+			match i {
+				FfaReplace::Abteilung2 { uuid, erstellt_am, insert } => {
+					format!("
+					<wfsext:Replace vendorId=\"AdV\" safeToIgnore=\"false\">
+						{insert}
+						<ogc:Filter>
+						  	<ogc:FeatureId fid=\"{uuid}{erstellt_am}\" />
+						</ogc:Filter>
+					</wfsext:Replace>
+					", insert = insert.get_xml(),
+						uuid = uuid,
+						erstellt_am = erstellt_am.format("%Y%m%dT%H%M%SZ"),
+					)
+				},
+				FfaReplace::Abteilung3 { uuid, erstellt_am, insert } => {
+					format!("
+					<wfsext:Replace vendorId=\"AdV\" safeToIgnore=\"false\">
+						{insert}
+						<ogc:Filter>
+						  	<ogc:FeatureId fid=\"{uuid}{erstellt_am}\" />
+						</ogc:Filter>
+					</wfsext:Replace>
+					", insert = insert.get_xml(),
+						uuid = uuid,
+						erstellt_am = erstellt_am.format("%Y%m%dT%H%M%SZ"),
+					)
+				},
+				FfaReplace::BuchungsstelleBelastetAbt2 { uuid, erstellt_am, insert } => {
+					format!("
+					<wfsext:Replace vendorId=\"AdV\" safeToIgnore=\"false\">
+						{insert}
+						<ogc:Filter>
+						  	<ogc:FeatureId fid=\"{uuid}{erstellt_am}\" />
+						</ogc:Filter>
+					</wfsext:Replace>
+					", insert = insert.get_xml(),
+						uuid = uuid,
+						erstellt_am = erstellt_am.format("%Y%m%dT%H%M%SZ"),
+					)
+				},
+				FfaReplace::BuchungsstelleBelastetAbt3 { uuid, erstellt_am, insert } => {
+					format!("
+					<wfsext:Replace vendorId=\"AdV\" safeToIgnore=\"false\">
+						{insert}
+						<ogc:Filter>
+						  	<ogc:FeatureId fid=\"{uuid}{erstellt_am}\" />
+						</ogc:Filter>
+					</wfsext:Replace>
+					", insert = insert.get_xml(),
+						uuid = uuid,
+						erstellt_am = erstellt_am.format("%Y%m%dT%H%M%SZ"),
+					)
+				},
+			}
+		}).collect::<Vec<_>>().join("\r\n");
+
 		let insert = self.insert.iter().map(|i| {
 			match i {
-				FfaInsert::Abteilung2 {
-					neue_uuid,
-					beginn_datum,
-					kan,
-					verfahren_uuid,
-					rechtsinhaber,
-					buchungsstelle_uuid,
-					lfd_nr,
-					textlicher_teil,
-					rechteart,
-					rangvermerk,
-				} => {
-					format!("
-						<lefis:LX_Abteilung2 gml:id=\"{neue_uuid}\">
-						  <gml:identifier codeSpace=\"http://www.adv-online.de/\">urn:adv:oid:{neue_uuid}</gml:identifier>
-						  <lebenszeitintervall>
-						    <AA_Lebenszeitintervall>
-						      <beginnt>{beginn_datum}</beginnt>
-						    </AA_Lebenszeitintervall>
-						  </lebenszeitintervall>
-						  <modellart>
-						    <AA_Modellart>
-						      <sonstigesModell>LEFIS</sonstigesModell>
-						    </AA_Modellart>
-						  </modellart>
-						  <lefis:kan>{kan}</lefis:kan>
-						  <lefis:gehoertZuVerfahren xlink:href=\"urn:adv:oid:{verfahren_uuid}\" />
-						  <lefis:unterliegtDemNachtrag>false</lefis:unterliegtDemNachtrag>
-						  <lefis:unterliegtEinerPlantextziffer>true</lefis:unterliegtEinerPlantextziffer>
-						  <lefis:kopierVorgangErfolgt>false</lefis:kopierVorgangErfolgt>
-						  {rechtsinhaber}
-						  <lefis:beziehtSichAuf2 xlink:href=\"urn:adv:oid:{buchungsstelle_uuid}\" />
-						  <lefis:lfdNr>{lfd_nr}</lefis:lfdNr>
-						  <lefis:textlicherTeil>{textlicher_teil}</lefis:textlicherTeil>
-						  <lefis:rechteArt>{rechteart}</lefis:rechteArt>
-						  <lefis:aktionsStatus>{aktionsstatus}</lefis:aktionsStatus>
-						  <lefis:rangvermerk>{rangvermerk}</lefis:rangvermerk>
-						</lefis:LX_Abteilung2>
-					",
-				    neue_uuid = neue_uuid,
-				    beginn_datum = beginn_datum.to_rfc3339_opts(SecondsFormat::Secs, true),
-				    kan = kan.code(),
-				    verfahren_uuid = verfahren_uuid,
-					rechtsinhaber = rechtsinhaber.iter().map(|uuid| {
-						format!("<lefis:istRechtsinhaber xlink:href=\"urn:adv:oid:{}\" />", uuid)
-					}).collect::<Vec<_>>().join("\r\n"),
-					buchungsstelle_uuid = buchungsstelle_uuid,
-					lfd_nr = lfd_nr,
-					textlicher_teil = xml_clean_text(textlicher_teil.trim()),
-					rechteart = rechteart.code(),
-					aktionsstatus = rechteart.get_aktionsstatus().code(),
-					rangvermerk = rangvermerk.trim(),
-					)
-				},
-				FfaInsert::Abteilung3 { 
-					neue_uuid,
-					beginn_datum,
-					kan, 
-					verfahren_uuid, 
-					rechtsinhaber,
-					buchungsstelle_uuid,
-					lfd_nr,
-					textlicher_teil,
-					waehrung,
-					betrag,
-					schuldenart,
-				} => {
-					format!("
-				        <lefis:LX_Abteilung3 gml:id=\"{neue_uuid}\">
-				          <gml:identifier codeSpace=\"http://www.adv-online.de/\">urn:adv:oid:{neue_uuid}</gml:identifier>
-				          <lebenszeitintervall>
-				            <AA_Lebenszeitintervall>
-				              <beginnt>{beginn_datum}</beginnt>
-				            </AA_Lebenszeitintervall>
-				          </lebenszeitintervall>
-				          <modellart>
-				            <AA_Modellart>
-				              <sonstigesModell>LEFIS</sonstigesModell>
-				            </AA_Modellart>
-				          </modellart>
-				          <lefis:kan>{kan}</lefis:kan>
-				          <lefis:gehoertZuVerfahren xlink:href=\"urn:adv:oid:{verfahren_uuid}\" />
-				          <lefis:unterliegtDemNachtrag>false</lefis:unterliegtDemNachtrag>
-				          <lefis:unterliegtEinerPlantextziffer>true</lefis:unterliegtEinerPlantextziffer>
-				          <lefis:kopierVorgangErfolgt>false</lefis:kopierVorgangErfolgt>
-				          {rechtsinhaber}
-				          <lefis:beziehtSichAuf3 xlink:href=\"urn:adv:oid:{buchungsstelle_uuid}\" />
-				          <lefis:lfdNr>{lfd_nr}</lefis:lfdNr>
-				          <lefis:textlicherTeil>{textlicher_teil}</lefis:textlicherTeil>
-				          <lefis:aktionsStatus>{aktionsstatus}</lefis:aktionsStatus>
-				          <lefis:betrag>
-				            <lefis:Waehrung uom=\"urn:lefis:uom:currency:{waehrung}\">{betrag}</lefis:Waehrung>
-				          </lefis:betrag>
-				          <lefis:rechteArt>{schuldenart}</lefis:rechteArt>
-				        </lefis:LX_Abteilung3>
-						", 
-						neue_uuid = neue_uuid,
-						beginn_datum = beginn_datum.to_rfc3339_opts(SecondsFormat::Secs, true),
-						kan = kan.code(),
-						verfahren_uuid = verfahren_uuid,
-						rechtsinhaber = rechtsinhaber.iter().map(|uuid| {
-							format!("<lefis:beguenstigterRechtsinhaber xlink:href=\"urn:adv:oid:{}\" />", uuid)
-						}).collect::<Vec<_>>().join("\r\n"),
-						buchungsstelle_uuid = buchungsstelle_uuid,
-						lfd_nr = lfd_nr,
-						textlicher_teil = xml_clean_text(textlicher_teil.trim()),
-						aktionsstatus = schuldenart.get_aktionsstatus().code(),
-						waehrung = waehrung.code(),
-						betrag = betrag,
-						schuldenart = schuldenart.code(),
-					)
-				},
-				FfaInsert::BuchungsstelleBelastetAbt2 { 
-					neue_buchungsstelle_uuid,
-					beginn_datum,
-					kan,
-					verfahren_uuid,
-					grundstuecke_belastet,
-					anteil_belastet_zaehler,
-					anteil_belastet_nenner,
-				} => {
-					format!("
-						<lefis:LX_BuchungsstelleBelastet gml:id=\"{neue_buchungsstelle_uuid}\">
-						  <gml:identifier codeSpace=\"http://www.adv-online.de/\">urn:adv:oid:{neue_buchungsstelle_uuid}</gml:identifier>
-						  <lebenszeitintervall>
-						    <AA_Lebenszeitintervall>
-						      <beginnt>{beginn_datum}</beginnt>
-						    </AA_Lebenszeitintervall>
-						  </lebenszeitintervall>
-						  <modellart>
-						    <AA_Modellart>
-						      <sonstigesModell>LEFIS</sonstigesModell>
-						    </AA_Modellart>
-						  </modellart>
-						  <lefis:kan>{kan}</lefis:kan>
-						  <lefis:gehoertZuVerfahren xlink:href=\"urn:adv:oid:{verfahren_uuid}\" />
-						  <lefis:unterliegtDemNachtrag>false</lefis:unterliegtDemNachtrag>
-						  <lefis:unterliegtEinerPlantextziffer>true</lefis:unterliegtEinerPlantextziffer>
-						  <lefis:kopierVorgangErfolgt>false</lefis:kopierVorgangErfolgt>
-						  {grundstuecke_belastet}
-						  <lefis:anteil>
-						    <AX_Anteil>
-						      <zaehler>{anteil_belastet_zaehler}</zaehler>
-						      <nenner>{anteil_belastet_nenner}</nenner>
-						    </AX_Anteil>
-						  </lefis:anteil>
-						</lefis:LX_BuchungsstelleBelastet>
-					",
-						neue_buchungsstelle_uuid = neue_buchungsstelle_uuid,
-				    	beginn_datum = beginn_datum.to_rfc3339_opts(SecondsFormat::Secs, true),
-				    	kan = kan.code(),
-				    	verfahren_uuid = verfahren_uuid,
-				    	grundstuecke_belastet = grundstuecke_belastet.iter().map(|uuid| {
-				    		format!("<lefis:belastetDasGrundstueck xlink:href=\"urn:adv:oid:{}\" />", uuid)
-				    	}).collect::<Vec<_>>().join("\r\n"),
-				    	anteil_belastet_zaehler = anteil_belastet_zaehler,
-				    	anteil_belastet_nenner = anteil_belastet_nenner.clone().max(1),
-					)
-				},
-				FfaInsert::BuchungsstelleBelastetAbt3 { 
-					neue_buchungsstelle_uuid,
-					beginn_datum,
-					kan,
-					verfahren_uuid,
-					grundstuecke_belastet,
-				} => {
-					format!("
-						<lefis:LX_BuchungsstelleBelastet gml:id=\"{neue_buchungsstelle_uuid}\">
-						  <gml:identifier codeSpace=\"http://www.adv-online.de/\">urn:adv:oid:{neue_buchungsstelle_uuid}</gml:identifier>
-						  <lebenszeitintervall>
-						    <AA_Lebenszeitintervall>
-						      <beginnt>{beginn_datum}</beginnt>
-						    </AA_Lebenszeitintervall>
-						  </lebenszeitintervall>
-						  <modellart>
-						    <AA_Modellart>
-						      <sonstigesModell>LEFIS</sonstigesModell>
-						    </AA_Modellart>
-						  </modellart>
-						  <lefis:kan>{kan}</lefis:kan>
-						  <lefis:gehoertZuVerfahren xlink:href=\"urn:adv:oid:{verfahren_uuid}\" />
-						  <lefis:unterliegtDemNachtrag>false</lefis:unterliegtDemNachtrag>
-						  <lefis:unterliegtEinerPlantextziffer>true</lefis:unterliegtEinerPlantextziffer>
-						  <lefis:kopierVorgangErfolgt>false</lefis:kopierVorgangErfolgt>
-						  {grundstuecke_belastet}
-						</lefis:LX_BuchungsstelleBelastet>
-					",
-						neue_buchungsstelle_uuid = neue_buchungsstelle_uuid,
-				    	beginn_datum = beginn_datum.to_rfc3339_opts(SecondsFormat::Secs, true),
-				    	kan = kan.code(),
-				    	verfahren_uuid = verfahren_uuid,
-				    	grundstuecke_belastet = grundstuecke_belastet.iter().map(|uuid| {
-				    		format!("<lefis:belastetDasGrundstueck xlink:href=\"urn:adv:oid:{}\" />", uuid)
-				    	}).collect::<Vec<_>>().join("\r\n"),
-					)
-				},
+				FfaInsert::Abteilung2(a) => a.get_xml(),
+				FfaInsert::Abteilung3(a) => a.get_xml(),
+				FfaInsert::BuchungsstelleBelastetAbt2(a) => a.get_xml(),
+				FfaInsert::BuchungsstelleBelastetAbt3(a) => a.get_xml(),
 			}
 		}).collect::<Vec<_>>().join("\r\n");
 
@@ -962,7 +1326,7 @@ impl FortfuehrungsAuftrag {
 			      {insert}
 			    </wfs:Transaction>
 			  </geaenderteObjekte>
-			  <profilkennung>LEFIS Upload</profilkennung>
+			  <profilkennung>AED Sicad</profilkennung>
 			  <antragsnummer>LefisUpload-{auftragsnummer}-{antragsnummer}</antragsnummer>
 			  <auftragsnummer>{auftragsnummer}</auftragsnummer>
 			  <impliziteLoeschungDerReservierung>4000</impliziteLoeschungDerReservierung>
@@ -974,7 +1338,7 @@ impl FortfuehrungsAuftrag {
 		  </AX_Fortfuehrungsauftrag>
 		", 
 		delete = delete, 
-		replace = "",
+		replace = replace,
 		insert = if !insert.is_empty() { 
 			format!("<wfs:Insert>{}</wfs:Insert>", insert) 
 		} else { 

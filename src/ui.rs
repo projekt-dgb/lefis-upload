@@ -418,8 +418,14 @@ mod styles {
 }
 
 
-fn render_verfahrensuebersicht(app_data: RefAny, verfahren: &[VerfahrenGeladen], ausgewaehltes_verfahren: Option<usize>) -> Dom {
-    
+fn render_verfahrensuebersicht(
+    app_data: RefAny, 
+    verfahren_filter: &Option<String>, 
+    verfahren: &[VerfahrenGeladen], 
+    ausgewaehltes_verfahren: &Option<String>
+) -> Dom {
+    use azul::widgets::{TextInput, Button};
+
     div::render()
     .with_inline_css_props(CSS_MATCH_17359577546762513908)
     .with_ids_and_classes({
@@ -444,9 +450,47 @@ fn render_verfahrensuebersicht(app_data: RefAny, verfahren: &[VerfahrenGeladen],
                 .with_inline_css_props(CSS_MATCH_1569823123531431981)
             ])),
 
-            verfahren.iter().enumerate().map(|(vg_num, vg)| {
+            div::render()
+            .with_inline_style("padding:5px;flex-direction:row;".into())
+            .with_children(vec![
+                {
+                    let mut ti = TextInput::new()
+                    .with_text(verfahren_filter.clone().unwrap_or_default().into())
+                    .with_on_focus_lost(app_data.clone(), filter_verfahren);
 
-                let ist_ausgewaehlt = ausgewaehltes_verfahren == Some(vg_num);
+                    if verfahren_filter.is_none() {
+                        ti.set_placeholder("Projekte durchsuchen...".into());
+                    }
+
+                    ti.dom()
+                },
+                Dom::div()
+                .with_inline_style("padding-left:5px;".into())
+                .with_child(
+                    Button::new("Suche".into())
+                    .dom()
+                )
+            ].into()),
+            
+            verfahren
+            .iter()
+            .filter(|vg| {
+                let search_text = format!("{:06} - {}", vg.nummer, vg.name);
+                match verfahren_filter.as_ref() {
+                    None => true,
+                    Some(s) => search_text.contains(s) || {
+                        vg.grundbuchblaetter.iter().any(|bb| {
+                            match bb.ax_buchungsblatt.bbb_name.as_ref() {
+                                Some(b) => b.contains(s),
+                                None => false,
+                            }
+                        })
+                    },
+                }
+            })
+            .map(|vg| {
+
+                let ist_ausgewaehlt = *ausgewaehltes_verfahren == Some(vg.uuid.clone());
 
                 let mut d = div::render()
                 .with_children(DomVec::from_vec(vec![
@@ -462,7 +506,10 @@ fn render_verfahrensuebersicht(app_data: RefAny, verfahren: &[VerfahrenGeladen],
                 .with_callbacks(vec![CallbackData {
                     event: EventFilter::Hover(HoverEventFilter::MouseUp),
                     callback: Callback { cb: verfahren_auswaehlen },
-                    data: app_data.clone()
+                    data: RefAny::new(VerfahrenAuswaehlenDataset {
+                        backref: app_data.clone(),
+                        verfahren_uuid: vg.uuid.clone(),
+                    }),
                 }].into());
 
                 if !ist_ausgewaehlt {
@@ -476,17 +523,42 @@ fn render_verfahrensuebersicht(app_data: RefAny, verfahren: &[VerfahrenGeladen],
     ].into())
 }
 
+struct VerfahrenAuswaehlenDataset {
+    backref: RefAny,
+    verfahren_uuid: String,
+}
+
+use azul::widgets::TextInputState;
+
 extern "C"
-fn verfahren_auswaehlen(data: &mut RefAny, info: &mut CallbackInfo) -> Update {
+fn filter_verfahren(data: &mut RefAny, info: &mut CallbackInfo, ts: &TextInputState) -> Update {
 
     let mut data = match data.downcast_mut::<AppData>() {
         Some(s) => s,
         None => return Update::DoNothing,
     };
 
-    let index = info.get_index_in_parent(info.get_hit_node());
+    let text = ts.get_text();
+    data.verfahren_filter = if text.as_str().trim().is_empty() { None } else { Some(text.as_str().to_string()) };
+    Update::RefreshDom
+}
 
-    data.ausgewaehltes_verfahren = Some(index);
+extern "C"
+fn verfahren_auswaehlen(data: &mut RefAny, info: &mut CallbackInfo) -> Update {
+
+    let mut data = match data.downcast_mut::<VerfahrenAuswaehlenDataset>() {
+        Some(s) => s,
+        None => return Update::DoNothing,
+    };
+
+    let verfahren_uuid = data.verfahren_uuid.clone();
+
+    let mut data = match data.backref.downcast_mut::<AppData>() {
+        Some(s) => s,
+        None => return Update::DoNothing,
+    };
+
+    data.ausgewaehltes_verfahren = Some(verfahren_uuid);
 
     Update::RefreshDom
 }
@@ -501,10 +573,14 @@ fn render_verfahren_info(app_data: RefAny, data: &AppData) -> Dom {
         None => { return Dom::div(); },
     };
 
-    let ausgewaehltes_verfahren = match data.geladene_verfahren.verfahren.get(aw) {
+    let ausgewaehltes_verfahren = match data.geladene_verfahren.verfahren.iter().find(|v| v.uuid == aw) {
         Some(s) => s,
         None => { return Dom::div(); },
     };
+
+    let mut insert = 0;
+    let mut replace = 0;
+    let mut delete = 0;
 
     div::render()
     .with_inline_css_props(CSS_MATCH_2875502314340155187)
@@ -680,12 +756,16 @@ fn render_verfahren_info(app_data: RefAny, data: &AppData) -> Dom {
             None => div::render(),
             Some(v) => {                
                 let mut warnungen = Vec::new();
-                let _ = generiere_ffa(
+                let ffa = generiere_ffa(
                     &data.geladene_verfahren, 
-                    aw, 
+                    &aw, 
                     v,
                     &mut warnungen
                 );
+
+                insert = ffa.insert.len();
+                replace = ffa.replace.len();
+                delete = ffa.delete.len();
 
                 match warnungen.first() {
                     Some(s) => {
@@ -807,7 +887,10 @@ fn render_verfahren_info(app_data: RefAny, data: &AppData) -> Dom {
                         .with_inline_css_props(CSS_MATCH_1550058906051548789)
                         .with_children(DomVec::from_vec(vec![
                             div::render().with_children(vec![
-                                p::render(format!("Ok: {} Grundbuchblätter bereit für Fortführung in DHK", v.len()).into()),
+                                p::render(
+                                    format!("Ok: {} Grundbuchblätter bereit für Fortführung in DHK ({} Insert, {} Replace, {} Delete)", 
+                                    v.len(), insert, replace, delete)
+                                .into()),
                             ].into())
                             .with_inline_style("display: flex; flex-grow: 1;".into()),
                             div::render().with_children(vec![
@@ -857,7 +940,7 @@ fn switch_active_tab(data: &mut RefAny, _info: &mut CallbackInfo, th: &TabHeader
 
     let data_mut = &mut *data_mut;
 
-    let aktives_verfahren = match data_mut.ausgewaehltes_verfahren.clone().and_then(|d| data_mut.geladene_verfahren.verfahren.get_mut(d)) {
+    let aktives_verfahren = match data_mut.ausgewaehltes_verfahren.clone().and_then(|d| data_mut.geladene_verfahren.verfahren.iter_mut().find(|v| v.uuid == d)) {
         Some(s) => s,
         None => return Update::DoNothing,
     };
@@ -880,7 +963,7 @@ fn lefis_datei_laden(data: &mut RefAny, _info: &mut CallbackInfo, fi: &FileInput
 
     let data_mut = &mut *data_mut;
 
-    let aktives_verfahren = match data_mut.ausgewaehltes_verfahren.clone().and_then(|d| data_mut.geladene_verfahren.verfahren.get_mut(d)) {
+    let aktives_verfahren = match data_mut.ausgewaehltes_verfahren.clone().and_then(|d| data_mut.geladene_verfahren.verfahren.iter_mut().find(|v| v.uuid == d)) {
         Some(s) => s,
         None => return Update::DoNothing,
     };
@@ -929,7 +1012,7 @@ fn verfahren_exportieren(data: &mut RefAny, _: &mut CallbackInfo) -> Update {
     };
     let data_mut = &mut *data_mut;
 
-    let aktives_verfahren = match data_mut.ausgewaehltes_verfahren.clone().and_then(|d| data_mut.geladene_verfahren.verfahren.get_mut(d)) {
+    let aktives_verfahren = match data_mut.ausgewaehltes_verfahren.clone().and_then(|d| data_mut.geladene_verfahren.verfahren.iter().find(|v| v.uuid == d)) {
         Some(s) => s,
         None => return Update::DoNothing,
     };
@@ -962,7 +1045,7 @@ fn lefis_ffa_exportieren(data: &mut RefAny, _: &mut CallbackInfo) -> Update {
         None => return Update::DoNothing,
     };
 
-    let aktives_verfahren = match data_mut.geladene_verfahren.verfahren.get_mut(aw) {
+    let aktives_verfahren = match data_mut.geladene_verfahren.verfahren.iter_mut().find(|v| v.uuid == aw) {
         Some(s) => s,
         None => return Update::DoNothing,
     };
@@ -975,7 +1058,7 @@ fn lefis_ffa_exportieren(data: &mut RefAny, _: &mut CallbackInfo) -> Update {
     let mut warnungen = Vec::new();
     let ffa = generiere_ffa(
         &data_mut.geladene_verfahren,
-        aw,
+        &aw,
         &lefis_geladen, 
         &mut warnungen
     );
@@ -1009,7 +1092,7 @@ fn lefis_datei_fortfuehren(data: &mut RefAny, info: &mut CallbackInfo) -> Update
 
     let geladene_verfahren = data_mut.geladene_verfahren.clone();
     let ausgewaehltes_verfahren = data_mut.ausgewaehltes_verfahren.clone();
-    let aktives_verfahren = match data_mut.ausgewaehltes_verfahren.clone().and_then(|d| data_mut.geladene_verfahren.verfahren.get_mut(d)) {
+    let aktives_verfahren = match data_mut.ausgewaehltes_verfahren.clone().and_then(|d| data_mut.geladene_verfahren.verfahren.iter_mut().find(|v| v.uuid == d)) {
         Some(s) => s,
         None => return Update::DoNothing,
     };
@@ -1043,7 +1126,7 @@ fn lefis_datei_fortfuehren(data: &mut RefAny, info: &mut CallbackInfo) -> Update
 struct BackgroundThreadInit {
     konfiguration: LefisUploadKonfiguration,
     geladene_verfahren: GeladeneVerfahren,
-    ausgewaehltes_verfahren: usize,
+    ausgewaehltes_verfahren: String,
 }
 
 #[derive(Debug, Clone)]
@@ -1076,8 +1159,8 @@ extern "C" fn ffa_background_thread(
     let initial_data = &*initial_data;
 
     let geladene_verfahren = &initial_data.geladene_verfahren;
-    let ausgewaehltes_verfahren = initial_data.ausgewaehltes_verfahren;
-    let verfahren = match geladene_verfahren.verfahren.get(ausgewaehltes_verfahren) {
+    let ausgewaehltes_verfahren = initial_data.ausgewaehltes_verfahren.as_str();
+    let verfahren = match geladene_verfahren.verfahren.iter().find(|v| v.uuid.as_str() == ausgewaehltes_verfahren) {
         Some(s) => s,
         None => return, // error
     };
@@ -1106,7 +1189,7 @@ extern "C" fn ffa_background_thread(
     let mut warnungen = Vec::new();
     let ffa_xml = generiere_ffa(
         &geladene_verfahren,
-        ausgewaehltes_verfahren,
+        &ausgewaehltes_verfahren,
         &lefis_geladen, 
         &mut warnungen
     ).get_xml();
@@ -1161,12 +1244,19 @@ extern "C" fn ffa_background_thread(
 
 fn generiere_ffa(
     geladene_verfahren: &GeladeneVerfahren,
-    aktives_verfahren: usize,
+    aktives_verfahren: &str,
     lefis_geladen: &[LefisDatei], 
     warnungen: &mut Vec<String>
 ) -> FortfuehrungsAuftrag {
 
-    use crate::wsdl::{FfaInsert, FfaDelete, KennzeichnungAlterNeuerBestand};
+    use crate::wsdl::{
+        FfaInsert, FfaDelete, FfaReplace,
+        FfaLxAbteilung2, FfaLxAbteilung3,
+        FfaLxBuchungsstelleBelastetAbt2,
+        FfaLxBuchungsstelleBelastetAbt3,
+        
+        KennzeichnungAlterNeuerBestand
+    };
     use chrono::Utc;
     use crate::BvEintrag;
     use std::collections::BTreeMap;
@@ -1174,17 +1264,13 @@ fn generiere_ffa(
     let jetzt = Utc::now();
     let kan = KennzeichnungAlterNeuerBestand::AlterBestand; // TODO: konfigurieren!
     let kurztexte_benutzen = true;
-    let verfahren = match geladene_verfahren.verfahren.get(aktives_verfahren) {
+    let verfahren = match geladene_verfahren.verfahren.iter().find(|v| v.uuid.as_str() == aktives_verfahren) {
         Some(s) => s,
         None => return FortfuehrungsAuftrag::default(),
     };
 
     // konfiguration: LefisUploadKonfiguration,
     // verfahren: VerfahrenGeladen,
-
-    // Lösche alle Rechte Abt 2. und 3.
-    let mut delete = Vec::new();
-    let mut insert = Vec::new();
 
     let mut uuid_counter = 0;
 
@@ -1200,7 +1286,15 @@ fn generiere_ffa(
 
     let mut fsk_nicht_gefunden = BTreeMap::new();
 
+    let mut global_delete = Vec::new();
+    let mut global_insert = Vec::new();
+    let mut global_replace = Vec::new();
+
     for grundbuchblatt in lefis_geladen.iter() {
+
+        let mut delete = Vec::new();
+        let mut insert = Vec::new();
+        let mut replace = Vec::new();
 
         let buchungsblattbezirke = match verfahren.buchungsblattbezirke.get(&grundbuchblatt.titelblatt.grundbuch_von) {
             Some(s) => s.clone(),
@@ -1233,50 +1327,6 @@ fn generiere_ffa(
                 continue;
             }
         };
-
-        for ax_buchungsstelle in gbb_vorhanden.ax_buchungsblatt.ax_buchungsstellen.iter()
-        // Wichtig: NIEMALS Rechte des NB löschen
-        .filter_map(|bb| if bb.kan == KennzeichnungAlterNeuerBestand::AlterBestand { Some(bb.uuid.clone()) } else { None }) {
-            
-            let abt2_found = verfahren.abt2_rechte
-                .iter()
-                .find_map(|a2| {
-                    a2.buchungsstellen
-                    .iter()
-                    .find(|bs| bs.ax21008 == *ax_buchungsstelle)
-                    .map(|b| (a2.clone(), b.clone()))
-                });
-
-
-            let abt3_found = verfahren.abt3_rechte
-                .iter()
-                .find_map(|a3| {
-                    a3.buchungsstellen
-                    .iter()
-                    .find(|bs| bs.ax21008 == *ax_buchungsstelle)
-                    .map(|b| (a3.clone(), b.clone()))
-                });
-
-            if let Some((abt2, bs)) = abt2_found {
-                delete.push(FfaDelete::Abteilung2 { 
-                    uuid: abt2.uuid.clone(),
-                    erstellt_am: abt2.erstellt_am.clone(), 
-                }); 
-                delete.push(FfaDelete::BuchungsstelleBelastet { 
-                    uuid: bs.lx21004.clone(),
-                    erstellt_am: bs.lx21004_erstellt_am.clone(), 
-                });
-            } else if let Some((abt3, bs)) = abt3_found {
-                delete.push(FfaDelete::Abteilung3 { 
-                    uuid: abt3.uuid.clone(),
-                    erstellt_am: abt3.erstellt_am.clone(), 
-                });
-                delete.push(FfaDelete::BuchungsstelleBelastet { 
-                    uuid: bs.lx21004.clone(),
-                    erstellt_am: bs.lx21004_erstellt_am.clone(), 
-                });
-            }
-        }
 
         'a2_inner: for a2_neu in grundbuchblatt.rechte.abt2.iter() {
 
@@ -1321,10 +1371,10 @@ fn generiere_ffa(
                     .and_then(|s| if s.trim().is_empty() { None } else { Some(s.trim())})
                     .unwrap_or(&grundbuchblatt.titelblatt.grundbuch_von);
                 
-                let gemarkung_ids = match verfahren.buchungsblattbezirke.get(belastet_gemarkungsbezirk) {
+                let gemarkung_ids = match verfahren.gemarkungen.get(belastet_gemarkungsbezirk) {
                     Some(s) => s.clone(),
                     None => {
-                        warnungen.push(format!("Konnte Grundbuchbezirks-ID für {:?} nicht finden", belastet_gemarkungsbezirk));
+                        warnungen.push(format!("Konnte Gemarkungs-ID für {:?} nicht finden", belastet_gemarkungsbezirk));
                         continue;
                     }
                 };
@@ -1334,7 +1384,7 @@ fn generiere_ffa(
                     if gefunden.is_some() { break 'gemarkung_loop; }
                     
                     let suche_fsk = format!("{:02}{:04}{:03}{}{}__", 
-                        bb.lan16, bb.bbb, 
+                        bb.lan19, bb.gmn19, 
                         belastet.flur, belastet_zahler, 
                         belastet_nenner
                     );
@@ -1388,6 +1438,7 @@ fn generiere_ffa(
                         if gefuehrt_unter_lfd_nr.contains(&belastet.lfd_nr) {
                             grundstuecke_belastet.push(ax.lx21008); 
                         } else if !gefuehrt_unter_lfd_nr.is_empty() {
+                            /*
                             warnungen.push(format!("{} Blatt {} Abt. 2 Recht {}: Flurstück {} unter lfd. Nr. {:?} gefunden, erwartete lfd. Nr. {}", 
                                 grundbuchblatt.titelblatt.grundbuch_von,
                                 grundbuchblatt.titelblatt.blatt,
@@ -1396,6 +1447,7 @@ fn generiere_ffa(
                                 gefuehrt_unter_lfd_nr,
                                 belastet.lfd_nr,
                             ));
+                            */
                             grundstuecke_belastet.push(ax.lx21008); 
                         } else {
                             fsk_nicht_gefunden.entry((belastet_gemarkungsbezirk, belastet.flur, belastet.flurstueck.clone(), format!("{:?}", gemarkung_ids)))
@@ -1430,7 +1482,7 @@ fn generiere_ffa(
                 continue;
             }
 
-            insert.push(FfaInsert::Abteilung2 {
+            insert.push(FfaInsert::Abteilung2(FfaLxAbteilung2 {
                 neue_uuid: neue_uuid,
                 beginn_datum: jetzt.clone(),
                 kan: kan,
@@ -1445,8 +1497,8 @@ fn generiere_ffa(
                 },
                 rechteart: a2_neu.rechteart,
                 rangvermerk: a2_neu.rangvermerk.clone().unwrap_or_default(),
-            });
-            insert.push(FfaInsert::BuchungsstelleBelastetAbt2 { 
+            }));
+            insert.push(FfaInsert::BuchungsstelleBelastetAbt2(FfaLxBuchungsstelleBelastetAbt2 { 
                 neue_buchungsstelle_uuid,
                 beginn_datum: jetzt.clone(),
                 kan: kan,
@@ -1454,7 +1506,7 @@ fn generiere_ffa(
                 grundstuecke_belastet,
                 anteil_belastet_zaehler: 1,
                 anteil_belastet_nenner: 1,
-            }); 
+            })); 
         }
 
         'a3_outer: for a3_neu in grundbuchblatt.rechte.abt3.iter() {
@@ -1498,10 +1550,10 @@ fn generiere_ffa(
                     .and_then(|s| if s.trim().is_empty() { None } else { Some(s.trim())})
                     .unwrap_or(&grundbuchblatt.titelblatt.grundbuch_von);
                 
-                let gemarkung_ids = match verfahren.buchungsblattbezirke.get(belastet_gemarkungsbezirk) {
+                let gemarkung_ids = match verfahren.gemarkungen.get(belastet_gemarkungsbezirk) {
                     Some(s) => s.clone(),
                     None => {
-                        warnungen.push(format!("Konnte Grundbuchbezirks-ID für {:?} nicht finden", belastet_gemarkungsbezirk));
+                        warnungen.push(format!("Konnte Gemarkungs-ID für {:?} nicht finden", belastet_gemarkungsbezirk));
                         continue;
                     }
                 };
@@ -1511,7 +1563,7 @@ fn generiere_ffa(
                     if gefunden.is_some() { break 'gemarkung_loop; }
                     
                     let suche_fsk = format!("{:02}{:04}{:03}{}{}__", 
-                        bb.lan16, bb.bbb, 
+                        bb.lan19, bb.gmn19, 
                         belastet.flur, belastet_zahler, 
                         belastet_nenner
                     );
@@ -1565,6 +1617,7 @@ fn generiere_ffa(
                         if gefuehrt_unter_lfd_nr.contains(&belastet.lfd_nr) {
                             grundstuecke_belastet.push(ax.lx21008); 
                         } else if !gefuehrt_unter_lfd_nr.is_empty() {
+                            /*
                             warnungen.push(format!("{} Blatt {} Abt. 3 Recht {}: Flurstück {} unter lfd. Nr. {:?} gefunden, erwartete lfd. Nr. {}", 
                                 grundbuchblatt.titelblatt.grundbuch_von,
                                 grundbuchblatt.titelblatt.blatt,
@@ -1573,6 +1626,7 @@ fn generiere_ffa(
                                 gefuehrt_unter_lfd_nr,
                                 belastet.lfd_nr,
                             ));
+                            */
                             grundstuecke_belastet.push(ax.lx21008);
                         } else {
                             fsk_nicht_gefunden.entry((belastet_gemarkungsbezirk, belastet.flur, belastet.flurstueck.clone(), format!("{:?}", gemarkung_ids)))
@@ -1607,7 +1661,7 @@ fn generiere_ffa(
                 continue;
             }
 
-            insert.push(FfaInsert::Abteilung3 {
+            insert.push(FfaInsert::Abteilung3(FfaLxAbteilung3 {
                 neue_uuid,
                 beginn_datum: jetzt.clone(),
                 kan: kan, 
@@ -1623,15 +1677,117 @@ fn generiere_ffa(
                 waehrung: a3_neu.betrag.waehrung,
                 betrag: format!("{}.{:02}", a3_neu.betrag.wert, a3_neu.betrag.nachkomma),
                 schuldenart: a3_neu.schuldenart,
-            });
-            insert.push(FfaInsert::BuchungsstelleBelastetAbt3 { 
+            }));
+            insert.push(FfaInsert::BuchungsstelleBelastetAbt3(FfaLxBuchungsstelleBelastetAbt3 { 
                 neue_buchungsstelle_uuid: neue_buchungsstelle_uuid,
                 beginn_datum: jetzt.clone(),
                 kan: kan,
                 verfahren_uuid: verfahren.uuid.clone(),
                 grundstuecke_belastet: grundstuecke_belastet,
-            });
+            }));
         }
+
+        for ax_buchungsstelle in gbb_vorhanden.ax_buchungsblatt.ax_buchungsstellen.iter()
+        // Wichtig: NIEMALS Rechte des NB löschen
+        .filter_map(|bb| if bb.kan == KennzeichnungAlterNeuerBestand::AlterBestand { Some(bb.uuid.clone()) } else { None }) {
+            
+            let abt2_found = verfahren.abt2_rechte
+                .iter()
+                .find_map(|a2| {
+                    a2.buchungsstellen
+                    .iter()
+                    .find(|bs| bs.ax21008 == *ax_buchungsstelle)
+                    .map(|b| (a2.clone(), b.clone()))
+                });
+
+
+            let abt3_found = verfahren.abt3_rechte
+                .iter()
+                .find_map(|a3| {
+                    a3.buchungsstellen
+                    .iter()
+                    .find(|bs| bs.ax21008 == *ax_buchungsstelle)
+                    .map(|b| (a3.clone(), b.clone()))
+                });
+
+            if let Some((abt2, buchungsstelle)) = abt2_found {
+
+                // Wenn bereits ein insert existiert, Recht nicht 
+                // löschen sondern ersetzen
+                if let Some(insert_idx) = insert.iter().position(|i| match i {
+                    FfaInsert::Abteilung2(FfaLxAbteilung2 { lfd_nr, .. }) => *lfd_nr == abt2.lfd_nr,
+                    _ => false,
+                }) {
+                    let insert_buchungsstelle = match insert.remove(insert_idx + 1) {
+                         FfaInsert::BuchungsstelleBelastetAbt2(a) => a,
+                         _ => continue,
+                    };
+                    let insert = match insert.remove(insert_idx) {
+                         FfaInsert::Abteilung2(a) => a,
+                         _ => continue,
+                    };
+
+                    replace.push(FfaReplace::Abteilung2 { 
+                        uuid: abt2.uuid.clone(),
+                        erstellt_am: abt2.erstellt_am.clone(), 
+                        insert,
+                    }); 
+                    replace.push(FfaReplace::BuchungsstelleBelastetAbt2 {
+                        uuid: buchungsstelle.lx21004.clone(),
+                        erstellt_am: buchungsstelle.lx21004_erstellt_am.clone(), 
+                        insert: insert_buchungsstelle,
+                    }); 
+                } else {
+                    delete.push(FfaDelete::Abteilung2 { 
+                        uuid: abt2.uuid.clone(),
+                        erstellt_am: abt2.erstellt_am.clone(), 
+                    }); 
+                    delete.push(FfaDelete::BuchungsstelleBelastet { 
+                        uuid: buchungsstelle.lx21004.clone(),
+                        erstellt_am: buchungsstelle.lx21004_erstellt_am.clone(), 
+                    });
+                }
+            } else if let Some((abt3, buchungsstelle)) = abt3_found {
+
+                if let Some(insert_idx) = insert.iter().position(|i| match i {
+                    FfaInsert::Abteilung3(FfaLxAbteilung3 { lfd_nr, .. }) => *lfd_nr == abt3.lfd_nr,
+                    _ => false,
+                }) {
+                    let insert_buchungsstelle = match insert.remove(insert_idx + 1) {
+                        FfaInsert::BuchungsstelleBelastetAbt3(a) => a,
+                        _ => continue,
+                    };
+                    let insert = match insert.remove(insert_idx) {
+                        FfaInsert::Abteilung3(a) => a,
+                        _ => continue,
+                    };
+
+                    replace.push(FfaReplace::Abteilung3 { 
+                        uuid: abt3.uuid.clone(),
+                        erstellt_am: abt3.erstellt_am.clone(), 
+                        insert,
+                    }); 
+                    replace.push(FfaReplace::BuchungsstelleBelastetAbt3 {
+                        uuid: buchungsstelle.lx21004.clone(),
+                        erstellt_am: buchungsstelle.lx21004_erstellt_am.clone(), 
+                        insert: insert_buchungsstelle,
+                    }); 
+                } else {
+                    delete.push(FfaDelete::Abteilung3 { 
+                        uuid: abt3.uuid.clone(),
+                        erstellt_am: abt3.erstellt_am.clone(), 
+                    });
+                    delete.push(FfaDelete::BuchungsstelleBelastet { 
+                        uuid: buchungsstelle.lx21004.clone(),
+                        erstellt_am: buchungsstelle.lx21004_erstellt_am.clone(), 
+                    });
+                }
+            }
+        }
+
+        global_insert.append(&mut insert);
+        global_replace.append(&mut replace);
+        global_delete.append(&mut delete);
     }
 
     for ((gmk, flur, flurstueck, fsk), rechte) in fsk_nicht_gefunden {
@@ -1647,9 +1803,9 @@ fn generiere_ffa(
     FortfuehrungsAuftrag {
         verfahren_name: verfahren.name.clone(),
         verfahren_id: verfahren.nummer,
-        insert,
-        replace: Vec::new(),
-        delete,
+        insert: global_insert,
+        replace: global_replace,
+        delete: global_delete,
     }
 }
 
@@ -1774,11 +1930,14 @@ pub fn render(app_data: RefAny, data: &AppData) -> Dom {
 
         let mut menu = vec![
             MenuItem::String(StringMenuItem::new("Verfahren".into()).with_children(vec![
-                MenuItem::String(StringMenuItem::new("Neu laden".into()))
+                MenuItem::String(
+                    StringMenuItem::new("Neu laden".into())
+                    .with_callback(app_data.clone(), verfahren_neu_laden)
+                )
             ].into()))
         ];
 
-        if let Some(v) = data.ausgewaehltes_verfahren.clone().and_then(|n| data.geladene_verfahren.verfahren.get(n)) {
+        if let Some(v) = data.ausgewaehltes_verfahren.clone().and_then(|n| data.geladene_verfahren.verfahren.iter().find(|v| v.uuid == n)) {
             menu.push(MenuItem::String(StringMenuItem::new("Ausgewähltes Verfahren".into()).with_children(vec![
                 MenuItem::String(StringMenuItem::new("Exportieren...".into())
                     .with_callback(app_data.clone(), verfahren_exportieren)),
@@ -1799,10 +1958,78 @@ pub fn render(app_data: RefAny, data: &AppData) -> Dom {
     }.into()))
     .with_inline_css_props(CSS_MATCH_13650487208571438689)
     .with_children(DomVec::from_vec(vec![
-        render_verfahrensuebersicht(app_data.clone(), &data.geladene_verfahren.verfahren, data.ausgewaehltes_verfahren),
-        match data.ausgewaehltes_verfahren.and_then(|s| data.geladene_verfahren.verfahren.get(s)) {
+        render_verfahrensuebersicht(
+            app_data.clone(), 
+            &data.verfahren_filter,
+            &data.geladene_verfahren.verfahren, 
+            &data.ausgewaehltes_verfahren
+        ),
+        match data.ausgewaehltes_verfahren.as_ref().and_then(|s| data.geladene_verfahren.verfahren.iter().find(|v| v.uuid.as_str() == s.as_str())) {
             Some(s) => render_verfahren_info(app_data.clone(), data),
             None => div::render()
         }    
     ]))
+}
+
+extern "C"
+fn verfahren_neu_laden(app_data: &mut RefAny, _: &mut CallbackInfo) -> Update {
+    
+    use azul::dialog::MsgBox;
+    use crate::{LefisInfo, DhkVerbindung};
+
+    let mut data_mut = match app_data.downcast_mut::<AppData>() {
+        Some(s) => s,
+        None => return Update::DoNothing,
+    };
+    
+    let mut data_mut = &mut *data_mut;
+
+    let (konfiguration, db) = match LefisUploadKonfiguration::neu_laden() {
+        Ok(o) => {
+            let lefis_info = match LefisInfo::new(&o.lefis) {
+                Ok(o) => Some(o),
+                Err(e) => {
+                    MsgBox::error(format!("Fehler beim Auslesen der Oracle-Zugangsdaten: {:?}", e).into());
+                    return Update::DoNothing;
+                },
+            };
+
+            (o, lefis_info)
+        },
+        Err(e) => { 
+            MsgBox::error(e.clone().into()); 
+            return Update::DoNothing;
+        },
+    };
+
+    let dhk_verbindung = match db.as_ref() {
+        Some(s) => match DhkVerbindung::new(&s.oracle) {
+            Ok(o) => Some(o),
+            Err(e) => {
+                MsgBox::error(format!("Fehler beim Verbinden mit Oracle-Datenbank: {:#?} - {}", s, e).into());
+                return Update::DoNothing;
+            }
+        },
+        None => None,
+    };
+
+    let geladene_verfahren = match dhk_verbindung.as_ref().and_then(|dhk| match dhk.lade_verfahren() {
+        Ok(o) => Some(o),
+        Err(e) => {
+            MsgBox::error(format!("Fehler beim Laden der Verfahren: {}", e).into());
+            None
+        }
+    }) {
+        Some(s) => s,
+        None => return Update::DoNothing,
+    };
+
+    data_mut.konfiguration = konfiguration;
+    data_mut.lefis_info = db;
+    data_mut.dhk_verbindung = dhk_verbindung;
+    data_mut.geladene_verfahren = geladene_verfahren;
+    
+    MsgBox::info("OK - Verfahren wurden neu geladen.".into());
+
+    return Update::RefreshDom;
 }
