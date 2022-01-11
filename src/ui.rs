@@ -1484,7 +1484,7 @@ fn generiere_ffa(
 
             insert.push(FfaInsert::Abteilung2(FfaLxAbteilung2 {
                 neue_uuid: neue_uuid,
-                beginn_datum: jetzt.clone(),
+                beginnt_datum: jetzt.clone(),
                 kan: kan,
                 verfahren_uuid: verfahren.uuid.clone(),
                 rechtsinhaber: Vec::new(), // TODO
@@ -1500,7 +1500,7 @@ fn generiere_ffa(
             }));
             insert.push(FfaInsert::BuchungsstelleBelastetAbt2(FfaLxBuchungsstelleBelastetAbt2 { 
                 neue_buchungsstelle_uuid,
-                beginn_datum: jetzt.clone(),
+                beginnt_datum: jetzt.clone(),
                 kan: kan,
                 verfahren_uuid: verfahren.uuid.clone(),
                 grundstuecke_belastet,
@@ -1663,7 +1663,7 @@ fn generiere_ffa(
 
             insert.push(FfaInsert::Abteilung3(FfaLxAbteilung3 {
                 neue_uuid,
-                beginn_datum: jetzt.clone(),
+                beginnt_datum: jetzt.clone(),
                 kan: kan, 
                 verfahren_uuid: verfahren.uuid.clone(),
                 rechtsinhaber: Vec::new(), // TODO
@@ -1680,7 +1680,7 @@ fn generiere_ffa(
             }));
             insert.push(FfaInsert::BuchungsstelleBelastetAbt3(FfaLxBuchungsstelleBelastetAbt3 { 
                 neue_buchungsstelle_uuid: neue_buchungsstelle_uuid,
-                beginn_datum: jetzt.clone(),
+                beginnt_datum: jetzt.clone(),
                 kan: kan,
                 verfahren_uuid: verfahren.uuid.clone(),
                 grundstuecke_belastet: grundstuecke_belastet,
