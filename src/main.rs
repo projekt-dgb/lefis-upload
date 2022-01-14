@@ -14,7 +14,10 @@ use azul::{
     callbacks::{RefAny, LayoutCallbackInfo},
     window::{WindowCreateOptions, WindowFrame},
 };
-use crate::wsdl::{RequestFailure, KennzeichnungAlterNeuerBestand};
+use crate::wsdl::{
+    Anrede, ProtokollMsg, 
+    RequestFailure, KennzeichnungAlterNeuerBestand
+};
 use chrono::{DateTime, Utc};
 use std::collections::BTreeMap;
 
@@ -37,14 +40,28 @@ pub struct GeladeneVerfahren {
     pub flurstuecke_ohne_verfahren: Vec<AxFlurstueckOhneVerfahren>,
 }
 
-#[derive(Default, Clone, Debug, Serialize, Deserialize)]
+#[derive(Clone, Debug, Serialize, Deserialize)]
 pub struct LefisUploadKonfiguration {
     pub lefis: LefisUploadKonfigurationLEFIS,
+}
+impl Default for LefisUploadKonfiguration {
+    fn default() -> Self {
+        Self {
+            lefis: LefisUploadKonfigurationLEFIS::default(),
+        }
+    }
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct LefisUploadKonfigurationLEFIS {
-    pub webservice_url: String,
+    #[serde(default)]
+    pub https: bool,
+    #[serde(default)]
+    pub host: String,
+    #[serde(default)]
+    pub port: usize,
+    #[serde(default)]
+    pub service: String,
     #[serde(default)]
     pub benutzer: Option<String>,
     #[serde(default)]
@@ -54,10 +71,28 @@ pub struct LefisUploadKonfigurationLEFIS {
 impl Default for LefisUploadKonfigurationLEFIS {
     fn default() -> Self {
         Self {
-            webservice_url: format!("http://dvzsn-ra1170/AaaDhkWebService/AuftragsManager.asmx"),
+            https: false,
+            host: format!("dvzsn-ra1170"),
+            port: 80,
+            service: format!("AaaDhkWebService/AuftragsManager.asmx"),
             benutzer: None,
             passwort: None,
         }
+    }
+}
+
+impl LefisUploadKonfigurationLEFIS {
+    pub fn get_webservice_url(&self) -> String {
+        format!("{protocol}://{host}:{port}/{service}",
+            protocol = if self.https {
+                "https"
+            } else {
+                "http"
+            },
+            host = self.host.trim(),
+            port = self.port,
+            service = self.service.trim(),
+        )
     }
 }
 
@@ -126,15 +161,135 @@ pub struct VerfahrenGeladen {
     pub name: String,
     pub dhk_verbindung: String,
     pub uuid: String,
+
     pub flurstuecke: Vec<AxFlurstueck>,
-    // Achtung: Ein Gemarkungsname kann mehrere BBZ haben!
+    pub ordnungsnummern: Vec<OrdnungsnummerBodenordnung>,
+    pub personen_rollen: Vec<LxPersonRolle>,
+    pub personen: Vec<LxPerson>,
     pub gemarkungen: BTreeMap<String, Vec<Gemarkung>>,
     pub buchungsblattbezirke: BTreeMap<String, Vec<BuchungsblattBezirk>>,
-    pub grundbuchblaetter: Vec<LxBuchungsblattBodenordnung>,
+    pub buchungsblatt_bodenordnung: Vec<LxBuchungsblattBodenordnung>,
     pub abt2_rechte: Vec<LxAbteilung2>,
     pub abt3_rechte: Vec<LxAbteilung3>,
+    
     pub auftragsstatus: Option<Auftragsstatus>,
     pub lefis_geladen: Option<Vec<LefisDatei>>,
+}
+
+#[derive(Debug, Copy, Clone, PartialEq, Serialize, Deserialize)]
+pub enum LxPersonRolleArt {
+    Grundbucheigentuemer,
+    Katastereigentuemer,
+    LegitimierterEigentuemer,
+    Nebenbeteiligter,
+    LegitimierterNebenbeteiligter,
+}
+
+impl LxPersonRolleArt {
+
+    pub fn from_usize(u: usize) -> Option<Self> {
+        use self::LxPersonRolleArt::*;
+        match u {
+            1001 => Some(Grundbucheigentuemer),
+            1000 => Some(Katastereigentuemer),
+            1002 => Some(LegitimierterEigentuemer),
+            1003 => Some(Nebenbeteiligter),
+            1004 => Some(LegitimierterNebenbeteiligter),
+            _ => None,
+        }
+    }
+
+    pub fn code(&self) -> usize {
+        use self::LxPersonRolleArt::*;
+        match self {
+            Grundbucheigentuemer => 1001,
+            Katastereigentuemer => 1000,
+            LegitimierterEigentuemer => 1002,
+            Nebenbeteiligter => 1003,
+            LegitimierterNebenbeteiligter => 1004,
+        }
+    }
+}
+
+// LX21001
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
+pub struct LxPerson {
+    pub uuid: String,
+    pub beg: DateTime<Utc>,
+    pub ax_person: AxPerson,
+}
+
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
+pub struct AxPerson {
+    pub uuid: String,
+    pub beg: DateTime<Utc>,
+    // Optional, da Firmen auch ohne Anrede 
+    // angeschrieben werden können
+    pub anrede: Option<Anrede>,
+    pub titel: Option<String>,
+    pub vorname: Option<String>,
+    pub nachname_oder_firma: String,
+    pub geburtsname: Option<String>,
+    pub wohnort: Option<String>,
+}
+
+// LX22004
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
+pub struct LxPersonRolle {
+    pub uuid: String,
+    pub beg: DateTime<Utc>,
+    // Nicht jede Person hat eine PersonenRolle, z.B. Vertretung
+    pub person_uuid: String,
+    // LX22004.ADET
+    pub art: LxPersonRolleArt,
+    // LX21006 (LX21006-LX22004)
+    pub lx_namensnummer_uuid: String,
+}
+
+// LX22003
+#[derive(Default, Debug, Clone, PartialEq, Serialize, Deserialize)]
+pub struct OrdnungsnummerBodenordnung {
+    pub uuid: String,
+    pub stammnummer: usize,
+    pub unternummer: usize,
+    // A_LX22003_LX21007
+    pub ordnungsnummer_personen: Vec<BeteiligterLxBuchungsblattBodenordnung>,
+}
+
+impl OrdnungsnummerBodenordnung {
+    pub fn get_lx_namensnummern(&self) -> Vec<String> {
+        self.ordnungsnummer_personen
+        .iter()
+        .flat_map(|r| {
+            r.ax_buchungsblatt.buchungsstellen
+            .iter()
+            .map(|b| b.lx_namensnummer.clone())
+        }).collect()
+    }
+}
+
+// LX21007
+#[derive(Default, Debug, Clone, PartialEq, Serialize, Deserialize)]
+pub struct BeteiligterLxBuchungsblattBodenordnung {
+    pub uuid: String,
+    // Falsches "Nebenbeteiligten-Blatt"
+    pub ax_buchungsblatt: BeteiligterAxBuchungsblattBodenordnung,
+}
+
+// AX21007
+#[derive(Default, Debug, Clone, PartialEq, Serialize, Deserialize)]
+pub struct BeteiligterAxBuchungsblattBodenordnung {
+    pub uuid: String,
+    // AX21007 -> [AX21006] via
+    pub buchungsstellen: Vec<BeteiligterAxNamensnummer>,
+}
+
+#[derive(Default, Debug, Clone, PartialEq, Serialize, Deserialize)]
+pub struct BeteiligterAxNamensnummer {
+    // AX21006 - AX_Namensnummer
+    pub uuid: String,
+    // LX21006
+    pub lx_namensnummer: String,
 }
 
 #[derive(Default, Debug, Clone, PartialEq)]
@@ -156,11 +311,14 @@ pub struct UiState {
 
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
 pub struct VerfahrenGeladenExport {
-    pub uuid: String,
-    pub nummer: usize,
     pub name: String,
+    pub nummer: usize,
+    pub uuid: String,
     pub flurstuecke: Vec<AxFlurstueck>,
-    pub grundbuchblaetter: Vec<LxBuchungsblattBodenordnung>,
+    pub ordnungsnummern: Vec<OrdnungsnummerBodenordnung>,
+    pub personen_rollen: Vec<LxPersonRolle>,
+    pub personen: Vec<LxPerson>,
+    pub buchungsblatt_bodenordnung: Vec<LxBuchungsblattBodenordnung>,
     pub abt2_rechte: Vec<LxAbteilung2>,
     pub abt3_rechte: Vec<LxAbteilung3>,
 }
@@ -194,11 +352,14 @@ pub struct AxFlurstueckMitVerfahren {
 impl VerfahrenGeladen {
     pub fn to_json(&self) -> String {
         serde_json::to_string_pretty(&VerfahrenGeladenExport {
-            uuid: self.uuid.clone(),
-            nummer: self.nummer.clone(),
             name: self.name.clone(),
+            nummer: self.nummer.clone(),
+            uuid: self.uuid.clone(),
             flurstuecke: self.flurstuecke.clone(),
-            grundbuchblaetter: self.grundbuchblaetter.clone(),
+            ordnungsnummern: self.ordnungsnummern.clone(),
+            personen: self.personen.clone(),
+            personen_rollen: self.personen_rollen.clone(),
+            buchungsblatt_bodenordnung: self.buchungsblatt_bodenordnung.clone(),
             abt2_rechte: self.abt2_rechte.clone(),
             abt3_rechte: self.abt3_rechte.clone(),
         })
@@ -229,7 +390,7 @@ pub struct AxBuchungsstelle {
 #[derive(Debug, Clone, PartialEq)]
 pub enum Auftragsstatus {
     AuftragWirdFortgefuehrt { prozent: usize },
-    Fehler { text: String },
+    Fehler { log: Vec<ProtokollMsg> },
     ErfolgreichFortgefuehrt,
 }
 
@@ -254,12 +415,16 @@ pub struct LxAbteilung3 {
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
 pub struct LxBuchungsblattBodenordnung {
     pub uuid: String,
+    // Ist dieses Blatt ein fiktives Blatt für NB?
+    pub nebenbeteiligten_blatt: bool,
+    // GBVE: Haken
+    pub grundbuchvergleich_durchgefuehrt: bool,
     // grundbuchvergleich durchgeführt: bool
     // LX_OrdnungsnummerBodenordnung auswählen
     pub ax_buchungsblatt: AxBuchungsblatt,
 }
 
-#[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
+#[derive(Debug, Clone, PartialEq, Eq, Ord, PartialOrd, Serialize, Deserialize)]
 pub struct AxBuchungsblatt {
     pub uuid: String,
     // land
@@ -276,7 +441,7 @@ pub struct AxBuchungsblatt {
     pub ax_buchungsstellen: Vec<AxBestehendeBuchungsstelle>,
 }
 
-#[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
+#[derive(Debug, Clone, PartialEq, Eq, Ord, PartialOrd, Serialize, Deserialize)]
 pub struct AxBestehendeBuchungsstelle {
     pub uuid: String,
     /// Wichtig, da das Programm NUR Buchungsstellen des AB löschen sollten,
@@ -687,7 +852,7 @@ pub struct Betrag {
     pub waehrung: Waehrung,
 }
 
-#[derive(Default, Debug, Clone, PartialEq, Serialize, Deserialize)]
+#[derive(Default, Debug, Clone, PartialEq, Eq, Ord, PartialOrd, Serialize, Deserialize)]
 pub struct Nebenbeteiligter {
     // ONr., falls bereits vergeben
     pub ordnungsnummer: Option<usize>,
@@ -697,7 +862,7 @@ pub struct Nebenbeteiligter {
     pub name: String,
 }
 
-#[derive(Debug, Clone, PartialEq, Copy, PartialOrd, Serialize, Deserialize)]
+#[derive(Debug, Clone, PartialEq, Eq, Ord, PartialOrd, Serialize, Deserialize)]
 pub enum NebenbeteiligterTyp {
     #[serde(rename="OEFFENTLICH")]
     Oeffentlich,
@@ -718,25 +883,35 @@ pub enum NebenbeteiligterTyp {
 }
 
 impl LefisUploadKonfiguration {
+
+    fn konfiguration_pfad() -> String {
+        std::env::current_exe().ok()
+        .and_then(|p| Some({
+            p.parent()?.to_path_buf().join("Konfiguration.toml").to_str()?.to_string()
+        }))
+        .unwrap_or(format!("./Konfiguration.toml"))
+    }
+
+    pub fn speichern(&self) {
+        let _ = toml::to_string(self).ok().and_then(|s| {
+            let s = s.replace("\n", "\r\n");
+            std::fs::write(&Self::konfiguration_pfad(), &s.as_bytes()).ok()
+        });
+
+    }
+
     pub fn neu_laden() -> Result<Self, String> {
 
-        let konfiguration_pfad = std::env::current_exe().ok()
-            .and_then(|p| Some({
-                p.parent()?.to_path_buf().join("Konfiguration.toml").to_str()?.to_string()
-            }))
-            .unwrap_or(format!("./Konfiguration.toml"));
-
-        if !Path::new(&konfiguration_pfad).exists() {
-            let _ = toml::to_string(&LefisUploadKonfiguration::default())
-            .ok().and_then(|s| std::fs::write(&konfiguration_pfad, &s.as_bytes()).ok());
+        if !Path::new(&Self::konfiguration_pfad()).exists() {
+            LefisUploadKonfiguration::default().speichern();
         }
 
-        let konfig = match std::fs::read_to_string(&konfiguration_pfad) {
+        let konfig = match std::fs::read_to_string(&Self::konfiguration_pfad()) {
             Ok(o) => match toml::from_str(&o) {
                 Ok(o) => o,
-                Err(e) => return Err(format!("Fehler in Konfiguration {}: {}", konfiguration_pfad, e)),
+                Err(e) => return Err(format!("Fehler in Konfiguration {}: {}", Self::konfiguration_pfad(), e)),
             },
-            Err(e) => return Err(format!("Fehler beim Lesen von Konfiguration in {}: {}", konfiguration_pfad, e)),
+            Err(e) => return Err(format!("Fehler beim Lesen von Konfiguration in {}: {}", Self::konfiguration_pfad(), e)),
         };
 
         Ok(konfig)
@@ -750,7 +925,7 @@ impl LefisInfo {
         use crate::wsdl::AuftragsManager;
 
         let am = AuftragsManager::new(
-            &lefis.webservice_url, 
+            &lefis.get_webservice_url(), 
             lefis.benutzer.clone(), 
             lefis.passwort.clone()
         );
@@ -832,6 +1007,210 @@ impl DhkVerbindung {
         let mut flurstuecke_ohne_verfahren = Vec::new();
 
         for schema in verfahren_tabellen {
+
+            // Lade alle LX_Person / AxPerson aus dem Verfahren
+            let query_lx_person = format!("
+                SELECT a.UUID, a.BEG, a.LX91003, b.UUID, b.BEG, b.ANR, b.VNA, b.NBA, b.AKD, b.GNA, b.GEB, b.WOS, b.BER, b.SOS, b.HLG, b.NOF FROM {schema}.LX21001 a 
+                INNER JOIN {schema}.AX21001 b ON 
+                a.AX21001 = b.UUID", 
+                schema = schema
+            );
+
+            let mut stmt = self.conn.prepare(&query_lx_person, &[StmtParam::FetchArraySize(10000)])
+            .map_err(|e| {
+                format!("FEHLER in conn.prepare(\"{}\"): {}", query_lx_person, e)
+            })?;
+
+            let mut lx_person_map = BTreeMap::new();
+            if let Ok(rr) = stmt.query_as::<(
+                String, 
+                DateTime<Utc>, 
+                String, 
+
+                String,
+                DateTime<Utc>, 
+                Option<usize>,
+                Option<String>, 
+                Option<String>, 
+                Option<String>, 
+                Option<String>, 
+                Option<DateTime<Utc>>, 
+                Option<String>, 
+                Option<String>, 
+                Option<String>, 
+                Option<String>, 
+                String, 
+            )>(&[]) {
+                
+                for (
+                    uuid, 
+                    beg, 
+                    verfahren_uuid, 
+
+                    ax_uuid, 
+                    ax_beg,
+                    ax_anrede, 
+                    ax_vorname, 
+                    ax_nba, 
+                    ax_akd, 
+                    ax_geburtsname, 
+                    ax_geburtsdatum,
+                    ax_wohnort, 
+                    ax_beruf, 
+                    ax_sonstiges,
+                    ax_hlg,
+                    ax_nachname
+                ) in rr.into_iter().filter_map(|r| r.ok()) {
+                    
+                    let ax_anrede = ax_anrede.and_then(|a| Anrede::from_usize(a));
+
+                    lx_person_map
+                    .entry(verfahren_uuid)
+                    .or_insert_with(|| Vec::new())
+                    .push(LxPerson {
+                        uuid,
+                        beg,
+                        ax_person: AxPerson {
+                            uuid: ax_uuid,
+                            beg: ax_beg,
+                            anrede: ax_anrede,
+                            titel: ax_nba,
+                            vorname: ax_vorname,
+                            nachname_oder_firma: ax_nachname,
+                            geburtsname: ax_geburtsname,
+                            wohnort: ax_wohnort,
+                        }
+                    })
+                }
+            }
+
+            // Lade alle LX_PersonRolle mit LX_Namensnummer aus dem Verfahren
+            // Achtung: Vertretungen werden nicht geladen
+            let query_lx_person_rolle = format!("
+                SELECT a.UUID, a.BEG, a.ADET, a.LX91003, c.UUID, e.UUID FROM {schema}.LX22004 a 
+                INNER JOIN {schema}.A_LX21001_LX22004 b ON b.DFID = a.UUID 
+                INNER JOIN {schema}.LX21001 c ON c.UUID = b.OFID
+                INNER JOIN {schema}.A_LX21006_LX22004 d ON d.DFID = a.UUID
+                INNER JOIN {schema}.LX21006 e ON e.UUID = d.OFID", 
+                schema = schema
+            );
+            
+            let mut stmt = self.conn.prepare(&query_lx_person_rolle, &[StmtParam::FetchArraySize(10000)])
+            .map_err(|e| {
+                format!("FEHLER in conn.prepare(\"{}\"): {}", query_lx_person_rolle, e)
+            })?;
+
+            let mut lx_personen_rollen_map = BTreeMap::new();
+            match stmt.query_as::<(String, DateTime<Utc>, usize, String, String, String)>(&[]) {
+                Ok(rr) => {
+                    for (person_rolle_uuid, person_rolle_beg, adet, verfahren_uuid, person_uuid, lx_namensnummer_uuid) in rr.into_iter().filter_map(|r| r.ok()) {
+                         
+                         let art = match LxPersonRolleArt::from_usize(adet) {
+                             Some(s) => s,
+                             None => continue,
+                         };
+
+                         lx_personen_rollen_map
+                         .entry(verfahren_uuid)
+                         .or_insert_with(|| Vec::new())
+                         .push(LxPersonRolle {
+                             uuid: person_rolle_uuid,
+                             beg: person_rolle_beg,
+                             art,
+                             person_uuid: person_uuid,
+                             lx_namensnummer_uuid: lx_namensnummer_uuid,
+                         });
+                    }   
+                },
+                Err(e) => {
+                    println!("{:?}", e);
+                }
+            }
+
+            // Lade alle AX_Buchungsblatt => AX_Namensnummer <=> LX_Namensnummer
+            let query_ax_namensnummer = format!("
+                SELECT b.UUID, a.UUID, a.AX21007 FROM {schema}.AX21006 a 
+                INNER JOIN {schema}.LX21006 b ON a.UUID = b.AX21006", schema = schema);
+
+            let mut stmt = self.conn.prepare(&query_ax_namensnummer, &[StmtParam::FetchArraySize(10000)])
+            .map_err(|e| {
+                format!("FEHLER in conn.prepare(\"{}\"): {}", query_ax_namensnummer, e)
+            })?;
+
+            let mut buchungsblatt_namensnummer_map = BTreeMap::new();
+            match stmt.query_as::<(String, String, String)>(&[]) {
+                Ok(rr) => {
+                    for (lx_namensnummer, ax_namensnummer, ax_buchungsblatt) in rr.into_iter().filter_map(|r| r.ok()) {
+                        buchungsblatt_namensnummer_map.entry(ax_buchungsblatt)
+                        .or_insert_with(|| Vec::new())
+                        .push((ax_namensnummer, lx_namensnummer));
+                    }
+                },
+                Err(e) => {
+                    println!("{:?}", e);
+                }
+            }
+
+            // Lade alle LX_Ordnungsnummer_Bodenordnung inkl. Lx_BuchungsblattBodenordnung, gruppiert nach LX_Verfahren
+            let query_lx_onr = format!("
+                SELECT a.UUID, a.OSNR, a.OUNR, a.LX91003, c.UUID, d.UUID FROM {schema}.LX22003 a
+                LEFT JOIN {schema}.A_LX22003_LX21007 b ON a.UUID = b.OFID
+                INNER JOIN {schema}.LX21007 c ON c.UUID = b.DFID
+                INNER JOIN {schema}.AX21007 d ON c.AX21007 = d.UUID
+            ", schema = schema);
+            
+            let mut stmt = self.conn.prepare(&query_lx_onr, &[StmtParam::FetchArraySize(10000)])
+            .map_err(|e| {
+                format!("FEHLER in conn.prepare(\"{}\"): {}", query_lx_onr, e)
+            })?;
+
+            let mut ordnungsnummer_map = BTreeMap::new();
+
+            if let Ok(rr) = stmt.query_as::<(String, usize, usize, String, String, String)>(&[]) {
+                
+                let mut onr = BTreeMap::new();
+
+                for (uuid, stammnummer, unternummer, verfahren_uuid, lx_buchungsblatt_uuid, ax_buchungsblatt_uuid) in rr.into_iter().filter_map(|r| r.ok()) {
+                    
+                    let buchungsstellen = match buchungsblatt_namensnummer_map.get(&ax_buchungsblatt_uuid) {
+                        Some(s) => s.clone(),
+                        None => continue,
+                    };
+
+                    onr.entry(verfahren_uuid)
+                    .or_insert_with(|| BTreeMap::new())
+                    .entry((uuid, stammnummer, unternummer))
+                    .or_insert_with(|| Vec::new())
+                    .push(BeteiligterLxBuchungsblattBodenordnung {
+                        uuid: lx_buchungsblatt_uuid,
+                        ax_buchungsblatt: BeteiligterAxBuchungsblattBodenordnung {
+                            uuid: ax_buchungsblatt_uuid,
+                            buchungsstellen: buchungsstellen
+                            .into_iter()
+                            .map(|(ax_namensnummer, lx_namensnummer)| {
+                                BeteiligterAxNamensnummer {
+                                    uuid: ax_namensnummer,
+                                    lx_namensnummer,
+                                }
+                            }).collect(),
+                        }
+                    });
+                }
+
+                for (verfahren_uuid, onr_in_verfahren) in onr {
+                    for ((uuid, stammnummer, unternummer), ordnungsnummer_personen) in onr_in_verfahren {
+                        ordnungsnummer_map
+                        .entry(verfahren_uuid.clone())
+                        .or_insert_with(|| Vec::new())
+                        .push(OrdnungsnummerBodenordnung {
+                            uuid, 
+                            stammnummer, 
+                            unternummer, 
+                            ordnungsnummer_personen,
+                        });
+                    }
+                }
+            }
 
             // Lade alle AX_Flurstuecke gruppiert nach LX_Verfahren
             let query_ax_flurstuecke = format!("
@@ -985,7 +1364,7 @@ impl DhkVerbindung {
 
             // alle LX_BuchungsblattBodenordnung laden mit Verfahrens-ID und joinen mit AX_Buchungsblatt
             let query_grundbuchblattbezirke = format!("
-                SELECT a.UUID, a.LX91003, a.KAN, a.AX21007, b.LAN16, b.BBB, b.BBN, b.BLT 
+                SELECT a.UUID, a.LX91003, a.KAN, a.NEBL, a.GBVE, a.AX21007, b.LAN16, b.BBB, b.BBN, b.BLT 
                 FROM {schema}.LX21007 a
                 INNER JOIN {schema}.AX21007 b ON a.AX21007 = b.UUID
             ");
@@ -996,7 +1375,7 @@ impl DhkVerbindung {
             })?;
         
             let mut buchungsblatt_bodenordnung_map = BTreeMap::new();
-            if let Ok(rr) = stmt.query_as::<(String, String, usize, String, usize, usize, usize, usize)>(&[]) {
+            if let Ok(rr) = stmt.query_as::<(String, String, usize, usize, usize, String, usize, usize, usize, usize)>(&[]) {
 
                 let buchungsblatt_bodenordnung = rr
                 .into_iter()
@@ -1005,12 +1384,17 @@ impl DhkVerbindung {
                         uuid, 
                         verfahren_uuid,
                         kan,
+                        nebenbeteiligten_blatt,
+                        grundbuchvergleich_durchgefuehrt,
                         ax_buchungsblatt_uuid,
                         lan16,
                         bbb,
                         bbn,
                         blt,
                     ) = abt2?;
+
+                    let nebenbeteiligten_blatt = nebenbeteiligten_blatt == 1;
+                    let grundbuchvergleich_durchgefuehrt = grundbuchvergleich_durchgefuehrt == 1;
 
                     let kan = match KennzeichnungAlterNeuerBestand::from_usize(kan) {
                         Some(s) => s,
@@ -1033,6 +1417,8 @@ impl DhkVerbindung {
 
                     Ok((verfahren_uuid.clone(), LxBuchungsblattBodenordnung {
                         uuid,
+                        nebenbeteiligten_blatt,
+                        grundbuchvergleich_durchgefuehrt,
                         ax_buchungsblatt: AxBuchungsblatt {
                             uuid: ax_buchungsblatt_uuid,
                             lan16,
@@ -1273,11 +1659,12 @@ impl DhkVerbindung {
             .filter_map(|r| r.ok())
             .map(|(vnr, vkbz, vnam, uuid)| {
 
-                let grundbuchblaetter = buchungsblatt_bodenordnung_map.get(&uuid).cloned().unwrap_or_default();
+                let buchungsblatt_bodenordnung = buchungsblatt_bodenordnung_map.get(&uuid).cloned().unwrap_or_default();
                 let a2 = abteilung2_rechte_in_schema_map.get(&uuid).cloned().unwrap_or_default();
                 let a3 = abteilung3_rechte_in_schema_map.get(&uuid).cloned().unwrap_or_default();
 
                 VerfahrenGeladen {
+
                     ui: UiState::default(),
                     nummer: vnr,
                     name: if vnam.is_empty() { vkbz } else { vnam },
@@ -1286,8 +1673,11 @@ impl DhkVerbindung {
 
                     flurstuecke: flurstuecke_map.get(&uuid).cloned().unwrap_or_default(),
                     gemarkungen: ax_gemarkungen_reverse_map.clone(),
-                    grundbuchblaetter: grundbuchblaetter,
+                    personen: lx_person_map.get(&uuid).cloned().unwrap_or_default(),
+                    personen_rollen: lx_personen_rollen_map.get(&uuid).cloned().unwrap_or_default(),
+                    buchungsblatt_bodenordnung: buchungsblatt_bodenordnung,
                     buchungsblattbezirke: ax_buchungsblattbezirke_reverse_map.clone(),
+                    ordnungsnummern: ordnungsnummer_map.get(&uuid).cloned().unwrap_or_default(),
 
                     abt2_rechte: a2,
                     abt3_rechte: a3,
@@ -1328,12 +1718,14 @@ extern "C" fn render(data: &mut RefAny, _: &mut LayoutCallbackInfo) -> StyledDom
 
 fn main() {
 
+    let mut konnte_verfahren_nicht_laden_startup = false;
+
     let (konfiguration, db) = match LefisUploadKonfiguration::neu_laden() {
         Ok(o) => {
             let lefis_info = match LefisInfo::new(&o.lefis) {
                 Ok(o) => Some(o),
                 Err(e) => {
-                    MsgBox::error(format!("Fehler beim Auslesen der Oracle-Zugangsdaten: {:?}", e).into());
+                    konnte_verfahren_nicht_laden_startup = true;
                     None
                 },
             };
@@ -1341,7 +1733,7 @@ fn main() {
             (o, lefis_info)
         },
         Err(e) => { 
-            MsgBox::error(e.clone().into()); 
+            konnte_verfahren_nicht_laden_startup = true;
             (LefisUploadKonfiguration::default(), None) 
         },
     };
@@ -1350,24 +1742,27 @@ fn main() {
         Some(s) => match DhkVerbindung::new(&s.oracle) {
             Ok(o) => Some(o),
             Err(e) => {
-                println!("Fehler beim Verbinden mit Oracle-Datenbank: {}", e);
-                MsgBox::error(format!("Fehler beim Verbinden mit Oracle-Datenbank: {:#?} - {}", s, e).into());
+                konnte_verfahren_nicht_laden_startup = true;
                 None
             }
         },
         None => None,
     };
 
-    let geladene_verfahren = dhk_verbindung.as_ref().and_then(|dhk| match dhk.lade_verfahren() {
-        Ok(o) => Some(o),
-        Err(e) => {
-            println!("Fehler beim Laden der Verfahren: {}", e);
-            MsgBox::error(format!("Fehler beim Laden der Verfahren: {}", e).into());
-            None
-        }
-    }).unwrap_or_default();
+    let geladene_verfahren = if konnte_verfahren_nicht_laden_startup {
+        GeladeneVerfahren::default()
+    } else {
+        dhk_verbindung.as_ref().and_then(|dhk| match dhk.lade_verfahren() {
+            Ok(o) => Some(o),
+            Err(e) => {
+                println!("Fehler beim Laden der Verfahren: {}", e);
+                MsgBox::error(format!("Fehler beim Laden der Verfahren: {}", e).into());
+                None
+            }
+        }).unwrap_or_default()
+    };
 
-    let app = App::new(RefAny::new(AppData {
+    let mut app = App::new(RefAny::new(AppData {
         verfahren_filter: None,
         konfiguration,
         lefis_info: db,
@@ -1376,7 +1771,12 @@ fn main() {
         ausgewaehltes_verfahren: None,
     }), AppConfig::new(LayoutSolver::Default));
 
-    let mut window = WindowCreateOptions::new(render);
-    window.state.flags.frame = WindowFrame::Maximized;
-    app.run(window);
+    if konnte_verfahren_nicht_laden_startup {
+        app.add_window(crate::ui::konfiguration_fenster());
+    }
+
+    let mut root = WindowCreateOptions::new(render);
+    root.state.title = "LefisUpload".into();
+    root.state.flags.frame = WindowFrame::Maximized;
+    app.run(root);
 }

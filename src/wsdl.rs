@@ -1,7 +1,8 @@
+use std::fmt;
 use serde_derive::{Serialize, Deserialize};
 use lazy_static::lazy_static;
 use regex::Regex;
-use chrono::{DateTime, Utc};
+use chrono::{DateTime, SecondsFormat, Utc};
 use crate::{Waehrung, SchuldenArt, RechteArt};
 
 #[derive(Debug, Clone)]
@@ -68,6 +69,18 @@ pub enum RequestFailure {
 	FailedToSendSoap(String),
 	FailedToDeserializeResponse(String),
 	Soap(SoapFault),
+}
+
+impl fmt::Display for RequestFailure {
+	fn fmt(&self, f: &mut fmt::Formatter) -> fmt::Result {
+		use self::RequestFailure::*;
+		let e = match self {
+			FailedToSendSoap(e) => e.clone(),
+			FailedToDeserializeResponse(e) => e.clone(),
+			Soap(sf) => format!("E{}: {}", sf.code, sf.error),
+		};
+		write!(f, "{}", e)
+	}
 }
 
 #[derive(Debug, PartialEq, Clone)]
@@ -578,6 +591,7 @@ pub struct FortfuehrungsAuftrag {
 
 #[derive(Debug, Clone, PartialEq)]
 pub struct FfaLxAbteilung2 {
+	pub grundbuch_name: String,
 	pub neue_uuid: String,
 	pub beginnt_datum: DateTime<Utc>,
 	pub kan: KennzeichnungAlterNeuerBestand,
@@ -592,6 +606,7 @@ pub struct FfaLxAbteilung2 {
 
 #[derive(Debug, Clone, PartialEq)]
 pub struct FfaLxAbteilung3 {
+	pub grundbuch_name: String,
 	pub neue_uuid: String,
 	pub beginnt_datum: DateTime<Utc>,
 	pub kan: KennzeichnungAlterNeuerBestand, 
@@ -631,15 +646,20 @@ pub enum FfaInsert {
 	Abteilung3(FfaLxAbteilung3),
 	BuchungsstelleBelastetAbt2(FfaLxBuchungsstelleBelastetAbt2),
 	BuchungsstelleBelastetAbt3(FfaLxBuchungsstelleBelastetAbt3),
+	NebenbeteiligterNeu(FfaLxOrdnungsNummer),
 }
 
 #[derive(Debug, Clone, PartialEq)]
 pub enum FfaDelete {
 	Abteilung2 { 
+		grundbuch_name: String,
+		lfd_nr: usize,
 		uuid: String, 
 		erstellt_am: DateTime<Utc>, 
 	},
 	Abteilung3 { 
+		grundbuch_name: String,
+		lfd_nr: usize,
 		uuid: String,
 		erstellt_am: DateTime<Utc>, 
 	},
@@ -671,9 +691,19 @@ pub enum FfaReplace {
 		erstellt_am: DateTime<Utc>,
 		insert: FfaLxBuchungsstelleBelastetAbt3,
 	},
+	NebenbeteiligterReplace {
+		lx_person_rolle_erstellt_am: DateTime<Utc>,
+		lx_person_rolle: FfaLxPersonRolle,
+
+		lx_person_erstellt_am: DateTime<Utc>,
+		lx_person: FfaLxPerson,
+
+		ax_person_erstellt_am: DateTime<Utc>,
+		ax_person: FfaAxPerson,
+	}
 }
 
-#[derive(Debug, Copy, Clone, PartialEq, Serialize, Deserialize)]
+#[derive(Debug, Copy, Clone, PartialEq, Eq, Ord, PartialOrd, Serialize, Deserialize)]
 pub enum KennzeichnungAlterNeuerBestand {
 	AlterBestand,
 	NeuerBestand,
@@ -723,9 +753,9 @@ impl AktionsStatus {
 
 impl FfaLxAbteilung2 {
 	pub fn get_xml(&self) -> String {
-		use chrono::SecondsFormat;
 
 		let FfaLxAbteilung2 {
+			grundbuch_name,
 			neue_uuid,
 			beginnt_datum,
 			kan,
@@ -739,7 +769,7 @@ impl FfaLxAbteilung2 {
 		} = self;
 
 		format!("
-		<lefis:LX_Abteilung2 gml:id=\"{neue_uuid}\">
+		<lefis:LX_Abteilung2 gml:id=\"{neue_uuid}\"> <!-- {grundbuch_name} Abt. 2 Recht {lfd_nr} -->
 		  <gml:identifier codeSpace=\"http://www.adv-online.de/\">urn:adv:oid:{neue_uuid}</gml:identifier>
 		  <lebenszeitintervall>
 		    <AA_Lebenszeitintervall>
@@ -765,6 +795,7 @@ impl FfaLxAbteilung2 {
 		  <lefis:rangvermerk>{rangvermerk}</lefis:rangvermerk>
 		</lefis:LX_Abteilung2>
 		",
+		grundbuch_name = grundbuch_name,
 	    neue_uuid = neue_uuid,
 	    beginnt_datum = beginnt_datum.to_rfc3339_opts(SecondsFormat::Secs, true),
 	    kan = kan.code(),
@@ -783,9 +814,9 @@ impl FfaLxAbteilung2 {
 
 impl FfaLxAbteilung3 {
 	pub fn get_xml(&self) -> String {
-		use chrono::SecondsFormat;
 
 		let FfaLxAbteilung3 {
+			grundbuch_name,
 			neue_uuid,
 			beginnt_datum,
 			kan, 
@@ -800,7 +831,7 @@ impl FfaLxAbteilung3 {
 		} = self;
 
 		format!("
-	        <lefis:LX_Abteilung3 gml:id=\"{neue_uuid}\">
+	        <lefis:LX_Abteilung3 gml:id=\"{neue_uuid}\"> <!-- {grundbuch_name} Abt. 3 Recht {lfd_nr} -->
 	          <gml:identifier codeSpace=\"http://www.adv-online.de/\">urn:adv:oid:{neue_uuid}</gml:identifier>
 	          <lebenszeitintervall>
 	            <AA_Lebenszeitintervall>
@@ -827,7 +858,8 @@ impl FfaLxAbteilung3 {
 	          </lefis:betrag>
 	          <lefis:rechteArt>{schuldenart}</lefis:rechteArt>
 	        </lefis:LX_Abteilung3>
-			", 
+			",
+			grundbuch_name = grundbuch_name,
 			neue_uuid = neue_uuid,
 			beginnt_datum = beginnt_datum.to_rfc3339_opts(SecondsFormat::Secs, true),
 			kan = kan.code(),
@@ -847,7 +879,6 @@ impl FfaLxAbteilung3 {
 
 impl FfaLxBuchungsstelleBelastetAbt2 {
 	pub fn get_xml(&self) -> String {
-		use chrono::SecondsFormat;
 
 		let FfaLxBuchungsstelleBelastetAbt2 {
 			neue_buchungsstelle_uuid,
@@ -901,7 +932,6 @@ impl FfaLxBuchungsstelleBelastetAbt2 {
 
 impl FfaLxBuchungsstelleBelastetAbt3 {
 	pub fn get_xml(&self) -> String {
-		use chrono::SecondsFormat;
 
 		let FfaLxBuchungsstelleBelastetAbt3 {
 			neue_buchungsstelle_uuid,
@@ -943,128 +973,24 @@ impl FfaLxBuchungsstelleBelastetAbt3 {
 	}
 }
 
-pub struct FfaLxOrdnungsNummer {
-	pub ordnungsnummer_bodenordnung_uuid: String,
+#[derive(Debug, Clone, PartialEq)]
+pub struct FfaLxPersonRolle {
+	pub personenrolle_uuid: String,
 	pub beginnt_datum: DateTime<Utc>,
 	pub kan: KennzeichnungAlterNeuerBestand,
 	pub verfahren_uuid: String,
-	pub grundbucheigentum: Vec<String>,
-	pub stammnummer: usize,
-	pub unternummer: usize,
-	pub personenrolle_uuid: String,
-	pub lx_person_uuid: String,
-	pub ax_person_uuid: String,
-	pub nachname_oder_firma: String,
-	pub anrede: Anrede,
-	pub vorname: String,
-	pub titel: String,
-	pub geburtsname: String,
-	pub wohnort: String,
-	pub buchungsblatt_uuid: String,
-	pub bb_land: String,
-	pub bb_bezirk: String,
-	pub bbn_mit_erweiterung: String,
-	pub buchungsblatt_bodenordnung_uuid: String,
-	pub ax_namensnummer_uuid: String,
-	pub lx_namensnummer_uuid: String,
 }
 
-pub enum Anrede {
-	// 1000
-	Herr,
-	Frau,
-	Firma,
-}
-
-impl Anrede {
-	pub fn code(&self) -> usize {
-		use self::Anrede::*;
-		match self {
-			Herr => 2000,
-			Frau => 1000,
-			Firma => 3000,
-		}
-	}
-}
-
-impl FfaLxOrdnungsNummer {
+impl FfaLxPersonRolle {
 	pub fn get_xml(&self) -> String {
-
-		use chrono::SecondsFormat;
-
-		let FfaLxOrdnungsNummer {
-			ordnungsnummer_bodenordnung_uuid,
+		let FfaLxPersonRolle {
+			personenrolle_uuid,
 			beginnt_datum,
 			kan,
 			verfahren_uuid,
-			grundbucheigentum,
-			stammnummer,
-			unternummer,
-			personenrolle_uuid,
-			lx_person_uuid,
-			ax_person_uuid,
-			nachname_oder_firma,
-			anrede,
-			vorname,
-			titel,
-			geburtsname,
-			wohnort,
-			buchungsblatt_uuid,
-			bb_land,
-			bb_bezirk,
-			bbn_mit_erweiterung,
-			buchungsblatt_bodenordnung_uuid,
-			ax_namensnummer_uuid,
-			lx_namensnummer_uuid,
 		} = self;
 
-		let beginnt_datum = beginnt_datum.to_rfc3339_opts(SecondsFormat::Secs, true);
-
-		let lx_ordnungsnummer_bodenordnung = format!("
-			<lefis:LX_OrdnungsnummerBodenordnung gml:id=\"{ordnungsnummer_bodenordnung_uuid}\">
-			  <gml:identifier codeSpace=\"http://www.adv-online.de/\">urn:adv:oid:{ordnungsnummer_bodenordnung_uuid}</gml:identifier>
-			  <lebenszeitintervall>
-			    <AA_Lebenszeitintervall>
-			      <beginnt>{beginnt_datum}</beginnt>
-			    </AA_Lebenszeitintervall>
-			  </lebenszeitintervall>
-			  <modellart>
-			    <AA_Modellart>
-			      <sonstigesModell>LEFIS</sonstigesModell>
-			    </AA_Modellart>
-			  </modellart>
-			  <lefis:kan>{kan}</lefis:kan>
-			  <lefis:gehoertZuVerfahren xlink:href=\"urn:adv:oid:{verfahren_uuid}\" />
-			  <lefis:unterliegtDemNachtrag>false</lefis:unterliegtDemNachtrag>
-			  <lefis:unterliegtEinerPlantextziffer>true</lefis:unterliegtEinerPlantextziffer>
-			  <lefis:kopierVorgangErfolgt>false</lefis:kopierVorgangErfolgt>
-			  {grundbucheigentum}
-			  <lefis:anspruchsWert>0</lefis:anspruchsWert>
-			  <lefis:einlageWert>0</lefis:einlageWert>
-			  <lefis:ordnungsnummer>
-			    <lefis:LX_Ordnungsnummer>
-			      <lefis:stammnummer>{stammnummer}</lefis:stammnummer>
-			      <lefis:unternummer>{unternummer}</lefis:unternummer>
-			      <lefis:rechtsverhaeltnis>0</lefis:rechtsverhaeltnis>
-			    </lefis:LX_Ordnungsnummer>
-			  </lefis:ordnungsnummer>
-			  <lefis:rechtsbehelf>9999</lefis:rechtsbehelf>
-			  <lefis:ansprechpartner>(Nachname, Vorname)</lefis:ansprechpartner>
-			  <lefis:funktion>9999</lefis:funktion>
-			</lefis:LX_OrdnungsnummerBodenordnung>
-		",
-			ordnungsnummer_bodenordnung_uuid = ordnungsnummer_bodenordnung_uuid,
-			beginnt_datum = beginnt_datum,
-			kan = kan.code(),
-			verfahren_uuid = verfahren_uuid,
-			grundbucheigentum = grundbucheigentum.iter().map(|gb| {
-				format!("<lefis:hatGrundbucheigentum xlink:href=\"urn:adv:oid:{}\" />", gb)
-			}).collect::<Vec<_>>().join("\r\n"),
-			stammnummer = stammnummer,
-			unternummer = unternummer,
-		);
-
-		let personenrolle = format!("
+		format!("
 			<lefis:LX_PersonRolle gml:id=\"{personenrolle_uuid}\">
 			  <gml:identifier codeSpace=\"http://www.adv-online.de/\">urn:adv:oid:{personenrolle_uuid}</gml:identifier>
 			  <lebenszeitintervall>
@@ -1091,12 +1017,33 @@ impl FfaLxOrdnungsNummer {
 			</lefis:LX_PersonRolle>
 		",
 			personenrolle_uuid = personenrolle_uuid,
-			beginnt_datum = beginnt_datum,
+			beginnt_datum = beginnt_datum.to_rfc3339_opts(SecondsFormat::Secs, true),
 			kan = kan.code(),
 			verfahren_uuid = verfahren_uuid,
-		);
+		)
+	}
+}
 
-		let lx_person = format!("
+#[derive(Debug, Clone, PartialEq)]
+pub struct FfaLxPerson {
+	pub lx_person_uuid: String,
+	pub beginnt_datum: DateTime<Utc>,
+	pub verfahren_uuid: String,
+	pub personenrolle_uuid: String,
+	pub ax_person_uuid: String,
+}
+
+impl FfaLxPerson {
+	pub fn get_xml(&self) -> String {
+		let FfaLxPerson {
+			lx_person_uuid,
+			beginnt_datum,
+			verfahren_uuid,
+			personenrolle_uuid,
+			ax_person_uuid,
+		} = self;
+
+		format!("
 			<lefis:LX_Person gml:id=\"{lx_person_uuid}\">
 			  <gml:identifier codeSpace=\"http://www.adv-online.de/\">urn:adv:oid:{lx_person_uuid}</gml:identifier>
 			  <lebenszeitintervall>
@@ -1119,13 +1066,40 @@ impl FfaLxOrdnungsNummer {
 			</lefis:LX_Person>
 		",
 			lx_person_uuid = lx_person_uuid,
-			beginnt_datum = beginnt_datum,
+			beginnt_datum = beginnt_datum.to_rfc3339_opts(SecondsFormat::Secs, true),
 			verfahren_uuid = verfahren_uuid,
 			personenrolle_uuid = personenrolle_uuid,
 			ax_person_uuid = ax_person_uuid,
-		);
+		)
+	}
+}
 
-		let ax_person = format!("
+#[derive(Debug, Clone, PartialEq)]
+pub struct FfaAxPerson {
+	pub ax_person_uuid: String,
+	pub beginnt_datum: DateTime<Utc>,
+	pub nachname_oder_firma: String,
+	pub anrede: Option<Anrede>,
+	pub vorname: String,
+	pub titel: String,
+	pub geburtsname: String,
+	pub wohnort: String,
+}
+
+impl FfaAxPerson {
+	pub fn get_xml(&self) -> String {
+		let FfaAxPerson {
+			ax_person_uuid,
+			beginnt_datum,
+			nachname_oder_firma,
+			anrede,
+			vorname,
+			titel,
+			geburtsname,
+			wohnort,
+		} = self;
+
+		format!("
 			<AX_Person gml:id=\"{ax_person_uuid}\">
 			  <gml:identifier codeSpace=\"http://www.adv-online.de/\">urn:adv:oid:{ax_person_uuid}</gml:identifier>
 			  <lebenszeitintervall>
@@ -1144,7 +1118,7 @@ impl FfaLxOrdnungsNummer {
 			    </AA_Modellart>
 			  </modellart>
 			  <nachnameOderFirma>{nachname_oder_firma}</nachnameOderFirma>
-			  <anrede>{anrede}</anrede>
+			  {anrede}
 			  <vorname>{vorname}</vorname>
 			  <namensbestandteil>{titel}</namensbestandteil>
 			  <geburtsname>{geburtsname}</geburtsname>
@@ -1181,14 +1155,166 @@ impl FfaLxOrdnungsNummer {
 			</AX_Person>
 		",
 			ax_person_uuid = ax_person_uuid,
-			beginnt_datum = beginnt_datum,
-			nachname_oder_firma = nachname_oder_firma,
-			anrede = anrede.code(),
-			vorname = vorname,
-			titel = titel,
-			geburtsname = geburtsname,
-			wohnort = wohnort,
+			beginnt_datum = beginnt_datum.to_rfc3339_opts(SecondsFormat::Secs, true),
+			nachname_oder_firma = xml_clean_text(nachname_oder_firma),
+			anrede = anrede.map(|s| format!("<anrede>{}</anrede>", s.code())).unwrap_or_default(),
+			vorname = xml_clean_text(vorname),
+			titel = xml_clean_text(titel),
+			geburtsname = xml_clean_text(geburtsname),
+			wohnort = xml_clean_text(wohnort),
+		)
+	}
+}
+
+#[derive(Debug, Clone, PartialEq)]
+pub struct FfaLxOrdnungsNummer {
+	pub ordnungsnummer_bodenordnung_uuid: String,
+	pub beginnt_datum: DateTime<Utc>,
+	pub kan: KennzeichnungAlterNeuerBestand,
+	pub verfahren_uuid: String,
+	pub stammnummer: usize,
+	pub unternummer: usize,
+	pub personenrolle_uuid: String,
+	pub lx_person_uuid: String,
+	pub ax_person_uuid: String,
+	pub nachname_oder_firma: String,
+	pub anrede: Option<Anrede>,
+	pub vorname: String,
+	pub titel: String,
+	pub geburtsname: String,
+	pub wohnort: String,
+	pub buchungsblatt_uuid: String,
+	pub bb_land: String,
+	pub bb_bezirk: String,
+	pub bbn_mit_erweiterung: String,
+	pub buchungsblatt_bodenordnung_uuid: String,
+	pub ax_namensnummer_uuid: String,
+	pub lx_namensnummer_uuid: String,
+}
+
+#[derive(Debug, Copy, Clone, PartialEq, Serialize, Deserialize)]
+pub enum Anrede {
+	// 1000
+	Herr,
+	Frau,
+	Firma,
+}
+
+impl Anrede {
+	pub fn from_usize(u: usize) -> Option<Self> {
+		match u {
+			2000 => Some(Anrede::Herr),
+			1000 => Some(Anrede::Frau),
+			3000 => Some(Anrede::Firma),
+			_ => None,
+		}
+	}
+
+	pub fn code(&self) -> usize {
+		use self::Anrede::*;
+		match self {
+			Herr => 2000,
+			Frau => 1000,
+			Firma => 3000,
+		}
+	}
+}
+
+impl FfaLxOrdnungsNummer {
+	pub fn get_xml(&self) -> String {
+
+		let FfaLxOrdnungsNummer {
+			ordnungsnummer_bodenordnung_uuid,
+			beginnt_datum,
+			kan,
+			verfahren_uuid,
+			stammnummer,
+			unternummer,
+			personenrolle_uuid,
+			lx_person_uuid,
+			ax_person_uuid,
+			nachname_oder_firma,
+			anrede,
+			vorname,
+			titel,
+			geburtsname,
+			wohnort,
+			buchungsblatt_uuid,
+			bb_land,
+			bb_bezirk,
+			bbn_mit_erweiterung,
+			buchungsblatt_bodenordnung_uuid,
+			ax_namensnummer_uuid,
+			lx_namensnummer_uuid,
+		} = self;
+
+		let lx_ordnungsnummer_bodenordnung = format!("
+			<lefis:LX_OrdnungsnummerBodenordnung gml:id=\"{ordnungsnummer_bodenordnung_uuid}\">
+			  <gml:identifier codeSpace=\"http://www.adv-online.de/\">urn:adv:oid:{ordnungsnummer_bodenordnung_uuid}</gml:identifier>
+			  <lebenszeitintervall>
+			    <AA_Lebenszeitintervall>
+			      <beginnt>{beginnt_datum}</beginnt>
+			    </AA_Lebenszeitintervall>
+			  </lebenszeitintervall>
+			  <modellart>
+			    <AA_Modellart>
+			      <sonstigesModell>LEFIS</sonstigesModell>
+			    </AA_Modellart>
+			  </modellart>
+			  <lefis:kan>{kan}</lefis:kan>
+			  <lefis:gehoertZuVerfahren xlink:href=\"urn:adv:oid:{verfahren_uuid}\" />
+			  <lefis:unterliegtDemNachtrag>false</lefis:unterliegtDemNachtrag>
+			  <lefis:unterliegtEinerPlantextziffer>true</lefis:unterliegtEinerPlantextziffer>
+			  <lefis:kopierVorgangErfolgt>false</lefis:kopierVorgangErfolgt>
+			  <lefis:hatGrundbucheigentum xlink:href=\"urn:adv:oid:{buchungsblatt_uuid}\" />
+			  <lefis:anspruchsWert>0</lefis:anspruchsWert>
+			  <lefis:einlageWert>0</lefis:einlageWert>
+			  <lefis:ordnungsnummer>
+			    <lefis:LX_Ordnungsnummer>
+			      <lefis:stammnummer>{stammnummer}</lefis:stammnummer>
+			      <lefis:unternummer>{unternummer}</lefis:unternummer>
+			      <lefis:rechtsverhaeltnis>0</lefis:rechtsverhaeltnis>
+			    </lefis:LX_Ordnungsnummer>
+			  </lefis:ordnungsnummer>
+			  <lefis:rechtsbehelf>9999</lefis:rechtsbehelf>
+			  <lefis:ansprechpartner>(Nachname, Vorname)</lefis:ansprechpartner>
+			  <lefis:funktion>9999</lefis:funktion>
+			</lefis:LX_OrdnungsnummerBodenordnung>
+		",
+			ordnungsnummer_bodenordnung_uuid = ordnungsnummer_bodenordnung_uuid,
+			beginnt_datum = beginnt_datum.to_rfc3339_opts(SecondsFormat::Secs, true),
+			kan = kan.code(),
+			verfahren_uuid = verfahren_uuid,
+			buchungsblatt_uuid = buchungsblatt_uuid,
+			stammnummer = stammnummer,
+			unternummer = unternummer,
 		);
+
+		let personenrolle = FfaLxPersonRolle {
+			personenrolle_uuid: personenrolle_uuid.clone(),
+			beginnt_datum: beginnt_datum.clone(),
+			kan: kan.clone(),
+			verfahren_uuid: verfahren_uuid.clone(),
+		}.get_xml();
+
+		let lx_person = FfaLxPerson {
+			lx_person_uuid: lx_person_uuid.clone(),
+			beginnt_datum: beginnt_datum.clone(),
+			verfahren_uuid: verfahren_uuid.clone(),
+			personenrolle_uuid: personenrolle_uuid.clone(),
+			ax_person_uuid: ax_person_uuid.clone(),
+		}.get_xml();
+
+		let ax_person = FfaAxPerson {
+			ax_person_uuid: ax_person_uuid.clone(),
+			beginnt_datum: beginnt_datum.clone(),
+			nachname_oder_firma: nachname_oder_firma.clone(),
+			anrede: anrede.clone(),
+			vorname: vorname.clone(),
+			titel: titel.clone(),
+			geburtsname: geburtsname.clone(),
+			wohnort: wohnort.clone(),
+		}.get_xml();
 
 		let buchungsblatt = format!("
 			<AX_Buchungsblatt gml:id=\"{buchungsblatt_uuid}\">
@@ -1220,7 +1346,7 @@ impl FfaLxOrdnungsNummer {
 			</AX_Buchungsblatt>
 		",
 			buchungsblatt_uuid = buchungsblatt_uuid,
-			beginnt_datum = beginnt_datum,
+			beginnt_datum = beginnt_datum.to_rfc3339_opts(SecondsFormat::Secs, true),
 			bb_land = bb_land,
 			bb_bezirk = bb_bezirk,
 			bbn_mit_erweiterung = bbn_mit_erweiterung,
@@ -1251,7 +1377,7 @@ impl FfaLxOrdnungsNummer {
 			</lefis:LX_BuchungsblattBodenordnung>
 		",
 			buchungsblatt_bodenordnung_uuid = buchungsblatt_bodenordnung_uuid,
-			beginnt_datum = beginnt_datum,
+			beginnt_datum = beginnt_datum.to_rfc3339_opts(SecondsFormat::Secs, true),
 			verfahren_uuid = verfahren_uuid,
 			buchungsblatt_uuid = buchungsblatt_uuid,
 		);
@@ -1280,7 +1406,7 @@ impl FfaLxOrdnungsNummer {
 			</AX_Namensnummer>
 		",
 			ax_namensnummer_uuid = ax_namensnummer_uuid,
-			beginnt_datum = beginnt_datum,
+			beginnt_datum = beginnt_datum.to_rfc3339_opts(SecondsFormat::Secs, true),
 			buchungsblatt_uuid = buchungsblatt_uuid,
 			ax_person_uuid = ax_person_uuid,
 		);
@@ -1308,7 +1434,7 @@ impl FfaLxOrdnungsNummer {
 			</lefis:LX_Namensnummer>
 		",
 			lx_namensnummer_uuid = lx_namensnummer_uuid,
-			beginnt_datum = beginnt_datum,
+			beginnt_datum = beginnt_datum.to_rfc3339_opts(SecondsFormat::Secs, true),
 			kan = kan.code(),
 			verfahren_uuid = verfahren_uuid,
 			personenrolle_uuid = personenrolle_uuid,
@@ -1342,22 +1468,32 @@ impl FortfuehrungsAuftrag {
 
 		let delete = self.delete.iter().map(|d| {
 			match d {
-				FfaDelete::Abteilung2 { uuid, erstellt_am } => {
+				FfaDelete::Abteilung2 { uuid, erstellt_am, grundbuch_name, lfd_nr } => {
 					format!("
-						<wfs:Delete typeName=\"LX_Abteilung2\">
+						<wfs:Delete typeName=\"LX_Abteilung2\"> <!-- {grundbuch_name} Abt. 2 Recht {lfd_nr} -->
 							<ogc:Filter>
 							  	<ogc:FeatureId fid=\"{uuid}{erstellt_am}\" />
 							</ogc:Filter>
 						</wfs:Delete>
-					", uuid = uuid, erstellt_am = erstellt_am.format("%Y%m%dT%H%M%SZ"))
+					", 
+						uuid = uuid, 
+						erstellt_am = erstellt_am.format("%Y%m%dT%H%M%SZ"),
+						grundbuch_name = grundbuch_name,
+						lfd_nr = lfd_nr,
+					)
 				},
-				FfaDelete::Abteilung3 { uuid, erstellt_am } => {
+				FfaDelete::Abteilung3 { uuid, erstellt_am, grundbuch_name, lfd_nr } => {
 				format!("
-					<wfs:Delete typeName=\"LX_Abteilung3\">
+					<wfs:Delete typeName=\"LX_Abteilung3\"> <!-- {grundbuch_name} Abt. 3 Recht {lfd_nr} -->
 						<ogc:Filter>
 							<ogc:FeatureId fid=\"{uuid}{erstellt_am}\" />
 						</ogc:Filter>
-					</wfs:Delete>", uuid = uuid, erstellt_am = erstellt_am.format("%Y%m%dT%H%M%SZ"))
+					</wfs:Delete>", 
+					uuid = uuid, 
+					erstellt_am = erstellt_am.format("%Y%m%dT%H%M%SZ"), 
+					grundbuch_name = grundbuch_name, 
+					lfd_nr = lfd_nr, 
+					)
 				},
 				FfaDelete::BuchungsstelleBelastet { uuid, erstellt_am } => {
 					format!("
@@ -1424,6 +1560,47 @@ impl FortfuehrungsAuftrag {
 						erstellt_am = erstellt_am.format("%Y%m%dT%H%M%SZ"),
 					)
 				},
+				FfaReplace::NebenbeteiligterReplace {
+					lx_person_rolle_erstellt_am,
+					lx_person_rolle,
+					lx_person_erstellt_am,
+					lx_person,
+					ax_person_erstellt_am,
+					ax_person,
+				} => {
+					format!("
+					<wfsext:Replace vendorId=\"AdV\" safeToIgnore=\"false\">
+						{lx_person_rolle_xml}
+						<ogc:Filter>
+						  	<ogc:FeatureId fid=\"{lx_person_rolle_uuid}{lx_person_rolle_erstellt_am}\" />
+						</ogc:Filter>
+					</wfsext:Replace>
+
+					<wfsext:Replace vendorId=\"AdV\" safeToIgnore=\"false\">
+						{lx_person_xml}
+						<ogc:Filter>
+						  	<ogc:FeatureId fid=\"{lx_person_uuid}{lx_person_erstellt_am}\" />
+						</ogc:Filter>
+					</wfsext:Replace>
+
+					<wfsext:Replace vendorId=\"AdV\" safeToIgnore=\"false\">
+						{ax_person_xml}
+						<ogc:Filter>
+						  	<ogc:FeatureId fid=\"{ax_person_uuid}{ax_person_erstellt_am}\" />
+						</ogc:Filter>
+					</wfsext:Replace>
+					",
+						lx_person_rolle_xml = lx_person_rolle.get_xml(),
+						lx_person_rolle_uuid = lx_person_rolle.personenrolle_uuid,
+						lx_person_rolle_erstellt_am = lx_person_rolle_erstellt_am.format("%Y%m%dT%H%M%SZ"),
+						lx_person_xml = lx_person.get_xml(),
+						lx_person_uuid =lx_person.lx_person_uuid,
+						lx_person_erstellt_am = lx_person_erstellt_am.format("%Y%m%dT%H%M%SZ"),
+						ax_person_xml = ax_person.get_xml(),
+						ax_person_uuid = ax_person.ax_person_uuid,
+						ax_person_erstellt_am = ax_person_erstellt_am.format("%Y%m%dT%H%M%SZ"),
+					)
+				}
 			}
 		})
 		.collect::<Vec<_>>()
@@ -1435,6 +1612,7 @@ impl FortfuehrungsAuftrag {
 				FfaInsert::Abteilung3(a) => a.get_xml(),
 				FfaInsert::BuchungsstelleBelastetAbt2(a) => a.get_xml(),
 				FfaInsert::BuchungsstelleBelastetAbt3(a) => a.get_xml(),
+				FfaInsert::NebenbeteiligterNeu(a) => a.get_xml(),
 			}
 		}).collect::<Vec<_>>().join("\r\n");
 
@@ -1481,7 +1659,7 @@ impl FortfuehrungsAuftrag {
 			String::new() 
 		}, 
 		antragsnummer = self.verfahren_name, // Wilmersdorf-Weesow_...
-		auftragsnummer = format!("{:06}_0099", self.verfahren_id)) // 500108_005
+		auftragsnummer = format!("{}_0099", self.verfahren_id)) // 500108_005
 	}
 }
 

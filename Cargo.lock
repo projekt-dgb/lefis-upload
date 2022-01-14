@@ -10,6 +10,7 @@ dependencies = [
  "azul",
  "base64",
  "chrono",
+ "dedup_by",
  "flate2",
  "lazy_static",
  "log",
@@ -113,6 +114,12 @@ checksum = "738c290dfaea84fc1ca15ad9c168d083b05a714e1efddd8edaab678dc28d2836"
 dependencies = [
  "cfg-if",
 ]
+
+[[package]]
+name = "dedup_by"
+version = "0.1.0"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "2833790198d3bbff0168d6fa49a8ba266f126dbfa83e32a99396f44e024df551"
 
 [[package]]
 name = "encoding_rs"

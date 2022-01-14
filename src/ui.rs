@@ -1,10 +1,10 @@
 //! Auto-generated UI source code
 #![allow(unused_imports)]
 
-use azul::widgets::{FileInput, TabHeaderState, FileInputState};
+use azul::widgets::{FileInput, TabHeaderState, FileInputState, CheckBoxState, TextInputState, NumberInputState};
 use azul::task::{ThreadSender, ThreadReceiver};
 use crate::{LefisUploadKonfiguration, exec_sync};
-use crate::wsdl::{AuftragsManager, RequestFailure};
+use crate::wsdl::{ProtokollMsg, AuftragsManager, RequestFailure};
 use crate::GeladeneVerfahren;
 
 pub mod components {
@@ -479,7 +479,7 @@ fn render_verfahrensuebersicht(
                 match verfahren_filter.as_ref() {
                     None => true,
                     Some(s) => search_text.contains(s) || {
-                        vg.grundbuchblaetter.iter().any(|bb| {
+                        vg.buchungsblatt_bodenordnung.iter().any(|bb| {
                             match bb.ax_buchungsblatt.bbb_name.as_ref() {
                                 Some(b) => b.contains(s),
                                 None => false,
@@ -527,8 +527,6 @@ struct VerfahrenAuswaehlenDataset {
     backref: RefAny,
     verfahren_uuid: String,
 }
-
-use azul::widgets::TextInputState;
 
 extern "C"
 fn filter_verfahren(data: &mut RefAny, info: &mut CallbackInfo, ts: &TextInputState) -> Update {
@@ -591,7 +589,11 @@ fn render_verfahren_info(app_data: RefAny, data: &AppData) -> Dom {
         IdOrClassVec::from_const_slice(IDS_AND_CLASSES_12190625166707343638)
     })
     .with_children(DomVec::from_vec(vec![
-        p::render(format!("{:06} - {}", ausgewaehltes_verfahren.nummer, ausgewaehltes_verfahren.name).into())
+        p::render(format!("{:06} - {} ({})", 
+            ausgewaehltes_verfahren.nummer, 
+            ausgewaehltes_verfahren.name, 
+            ausgewaehltes_verfahren.dhk_verbindung
+        ).into())
         .with_inline_css_props(CSS_MATCH_10644212216580784356)
         .with_ids_and_classes({
             pub(in super) const IDS_AND_CLASSES_7612915473292556625: &[IdOrClass] = &[
@@ -616,6 +618,7 @@ fn render_verfahren_info(app_data: RefAny, data: &AppData) -> Dom {
             .with_inline_style("display: flex; flex-grow: 1;".into()),
             div::render().with_children(vec![
                 FileInput::new(None.into())
+                .with_default_text("Datei öffnen".into())
                 .with_on_path_change(app_data.clone(), lefis_datei_laden)
                 .dom()
             ].into())
@@ -623,43 +626,13 @@ fn render_verfahren_info(app_data: RefAny, data: &AppData) -> Dom {
         ])),
 
         div::render()
-        .with_inline_css_props(CSS_MATCH_11387455194806019534)
-        .with_ids_and_classes({
-            pub(in super) const IDS_AND_CLASSES_17584478058659276754: &[IdOrClass] = &[
-                        Class(AzString::from_const_str("verfahren-info")),
-
-            ];
-            IdOrClassVec::from_const_slice(IDS_AND_CLASSES_17584478058659276754)
-        })
-        .with_children(DomVec::from_vec(vec![
-            div::render()
-            .with_inline_css_props(CSS_MATCH_1313287635652259770)
-            .with_ids_and_classes({
-                pub(in super) const IDS_AND_CLASSES_3574993573047581730: &[IdOrClass] = &[
-                                Class(AzString::from_const_str("verfahrens-info-zeile")),
-
-                ];
-                IdOrClassVec::from_const_slice(IDS_AND_CLASSES_3574993573047581730)
-            })
-            .with_children(DomVec::from_vec(vec![
-                p::render(AzString::from_const_str("Verbindung:"))
-                .with_inline_css_props(CSS_MATCH_11080677877874143473),
-                p::render(format!("{} ({})", ausgewaehltes_verfahren.dhk_verbindung, data.konfiguration.lefis.webservice_url).into())
-                .with_inline_css_props(CSS_MATCH_7059827997353143778)
-                .with_ids_and_classes({
-                    pub(in super) const IDS_AND_CLASSES_14596186059031365806: &[IdOrClass] = &[
-                                        Class(AzString::from_const_str("text-rechts")),
-
-                    ];
-                    IdOrClassVec::from_const_slice(IDS_AND_CLASSES_14596186059031365806)
-                })
-            ])),
-        ])),
-
-        div::render()
         .with_children(vec![
             TabHeader::new(vec![
-                format!("Grundbuchblätter ({})", ausgewaehltes_verfahren.grundbuchblaetter.len()),
+                format!("Grundbuchblätter ({})", ausgewaehltes_verfahren.buchungsblatt_bodenordnung
+                        .iter()
+                        .filter(|i| !i.nebenbeteiligten_blatt)
+                        .count()
+                    ),
                 format!("Flurstücke ({})", ausgewaehltes_verfahren.flurstuecke.len()),
                 format!("Abt. 2 Rechte ({})", ausgewaehltes_verfahren.abt2_rechte.len()),
                 format!("Abt. 3 Rechte ({})", ausgewaehltes_verfahren.abt3_rechte.len()),
@@ -676,10 +649,10 @@ fn render_verfahren_info(app_data: RefAny, data: &AppData) -> Dom {
                 format!("Nr."),
                 format!("Anzahl Rechte"),
             ].into())
-            .with_rows(ausgewaehltes_verfahren.grundbuchblaetter.iter().take(20).map(|gb| {
+            .with_rows(ausgewaehltes_verfahren.buchungsblatt_bodenordnung.iter().take(20).map(|gb| {
                 ListViewRow {
                     cells: vec![
-                        CheckBox::new(false).dom(),
+                        CheckBox::new(gb.grundbuchvergleich_durchgefuehrt).dom(),
                         p::render(gb.ax_buchungsblatt.bbb_name.clone().unwrap_or_default().into()),
                         p::render(format!("{}", gb.ax_buchungsblatt.bbn).into()),
                         p::render(format!("{}", gb.ax_buchungsblatt.ax_buchungsstellen.len()).into()),
@@ -827,7 +800,7 @@ fn render_verfahren_info(app_data: RefAny, data: &AppData) -> Dom {
                             ]))
                         )
                     },
-                    Some(Auftragsstatus::Fehler { text }) => {
+                    Some(Auftragsstatus::Fehler { log }) => {
                         div::render()
                         .with_inline_style("padding-top:5px;".into())
                         .with_child(
@@ -844,17 +817,29 @@ fn render_verfahren_info(app_data: RefAny, data: &AppData) -> Dom {
                                 div::render()
                                 .with_inline_css_props(CSS_MATCH_11661823484470247691)
                                 .with_children(DomVec::from_vec(vec![
-                                    p::render(AzString::from_const_str("Fehler: Auftrag konnte nicht fortgeführt werden"))
+                                    p::render(AzString::from_const_str("Fehler: Auftrag konnte nicht fortgeführt werden")),
+                                    div::render().with_inline_style("flex-grow:1;".into()),
+                                    FileInput::new(None.into())
+                                    .with_default_text("Protokoll speichern unter".into())
+                                    .with_on_path_change(RefAny::new(ProtokollDataset {
+                                        log: log.clone(),
+                                    }), protokoll_speichern_unter)
+                                    .dom()
                                 ])),
                                 div::render()
                                 .with_inline_css_props(CSS_MATCH_18307594868656599026)
                                 .with_child(
                                     div::render()
                                     .with_inline_style("width:700px;font-size:12px;".into())
-                                    .with_child(
-                                        p::render(text.clone().into())
+                                    .with_child({
+                                        let text = log.iter().filter_map(|msg| match msg {
+                                            ProtokollMsg::Error(f) => Some(format!("Fehler: {}", f)),
+                                            _ => None,
+                                        }).collect::<Vec<_>>().join("\r\n\r\n");
+                                        
+                                        p::render(text.into())
                                         .with_inline_style("width:700px;font-size:12px;".into())
-                                    )
+                                    })
                                 )
                             ]))
                         )
@@ -907,6 +892,37 @@ fn render_verfahren_info(app_data: RefAny, data: &AppData) -> Dom {
     ]))
 }
 
+struct ProtokollDataset {
+    log: Vec<ProtokollMsg>,
+}
+
+extern "C"
+fn protokoll_speichern_unter(data: &mut RefAny, _info: &mut CallbackInfo, fi: &FileInputState) -> Update {
+    
+    let data = match data.downcast_ref::<ProtokollDataset>() {
+        Some(s) => s,
+        None => return Update::DoNothing,
+    };
+    let data = &*data;
+
+    let datei_pfad = match fi.path.as_ref() {
+        Some(s) => s.as_str().to_string(),
+        None => return Update::DoNothing,
+    };
+
+    let s = data.log.iter()
+        .map(|v| match v {
+            ProtokollMsg::Info(i) => format!("INFO: {}", i),
+            ProtokollMsg::Error(e) => format!("ERROR: {}", e),
+        })
+        .collect::<Vec<_>>()
+        .join("\r\n");
+
+    let _ = std::fs::write(&datei_pfad, s.as_bytes());
+
+    Update::RefreshDom
+}
+
 struct WarnungDialog {
     warnungen: Vec<String>,
 }
@@ -921,7 +937,7 @@ fn zeige_warnungen(data: &mut RefAny, _info: &mut CallbackInfo) -> Update {
         None => { return Update::DoNothing; },
     };
 
-    let _ = MsgBox::info(data.warnungen.clone().join("\r\n").into());
+    let _ = MsgBox::info(data.warnungen.clone().join("\r\n\r\n").into());
 
     Update::DoNothing
 }
@@ -1133,7 +1149,7 @@ struct BackgroundThreadInit {
 enum BackgroundThreadReturn {
     Fortgefuehrt { verfahrens_uuid: String },
     FortschrittUpdate { verfahrens_uuid: String, prozent: usize },
-    Fehler { verfahrens_uuid: String, text: String, },
+    Fehler { verfahrens_uuid: String, log: Vec<ProtokollMsg>, },
 }
 
 use crate::wsdl::FortfuehrungsAuftrag;
@@ -1166,14 +1182,13 @@ extern "C" fn ffa_background_thread(
     };
     let konfiguration = &initial_data.konfiguration.lefis;
 
-
     let lefis_geladen = match verfahren.lefis_geladen.as_ref() {
         Some(s) => s.clone(),
         None => return, // error
     };
 
     let am = AuftragsManager::new(
-        &konfiguration.webservice_url, 
+        &konfiguration.get_webservice_url(), 
         konfiguration.benutzer.clone(), 
         konfiguration.passwort.clone()
     );
@@ -1209,11 +1224,7 @@ extern "C" fn ffa_background_thread(
 
         if let Err(e) = &result {
             let protocol = am.get_protocol_gzip(login.session_id, &auftragsnummer).await?;
-            let fehler = protocol.protokoll_msg.iter().filter_map(|msg| match msg {
-                ProtokollMsg::Error(f) => Some(format!("Fehler: {}", f)),
-                _ => None,
-            }).collect::<Vec<_>>().join("\r\n\r\n");
-            protokoll_ext = Some(format!("\r\n\r\n{}", fehler));
+            protokoll_ext = Some(protocol.protokoll_msg);
         }
 
         am.logout(login.session_id).await?;
@@ -1223,10 +1234,9 @@ extern "C" fn ffa_background_thread(
 
     let data = match e {
         Err(e) => {
-            println!("{}", protokoll_ext.clone().unwrap_or_default());
             BackgroundThreadReturn::Fehler { 
-                verfahrens_uuid: verfahren.uuid.clone(), 
-                text: format!("{:?}{}", e, protokoll_ext.unwrap_or_default()),
+                verfahrens_uuid: verfahren.uuid.clone(),
+                log: protokoll_ext.unwrap_or_default(),
             }
         },
         Ok(_) => {
@@ -1254,12 +1264,15 @@ fn generiere_ffa(
         FfaLxAbteilung2, FfaLxAbteilung3,
         FfaLxBuchungsstelleBelastetAbt2,
         FfaLxBuchungsstelleBelastetAbt3,
-        
+        FfaLxOrdnungsNummer, Anrede,
+        FfaLxPersonRolle, FfaLxPerson,
+        FfaAxPerson,
+
         KennzeichnungAlterNeuerBestand
     };
     use chrono::Utc;
     use crate::BvEintrag;
-    use std::collections::BTreeMap;
+    use std::collections::{BTreeMap, BTreeSet};
 
     let jetzt = Utc::now();
     let kan = KennzeichnungAlterNeuerBestand::AlterBestand; // TODO: konfigurieren!
@@ -1289,8 +1302,12 @@ fn generiere_ffa(
     let mut global_delete = Vec::new();
     let mut global_insert = Vec::new();
     let mut global_replace = Vec::new();
+    let mut alle_ordnungsnummern = BTreeMap::new();
+    let mut ordnungsnummern_zu_rechte_map = BTreeMap::new();
 
     for grundbuchblatt in lefis_geladen.iter() {
+
+        let grundbuch_name = format!("{} Blatt {}", grundbuchblatt.titelblatt.grundbuch_von, grundbuchblatt.titelblatt.blatt);
 
         let mut delete = Vec::new();
         let mut insert = Vec::new();
@@ -1306,7 +1323,7 @@ fn generiere_ffa(
 
         let mut gbb_vorhanden = None;
         for bb in buchungsblattbezirke {        
-            match verfahren.grundbuchblaetter.iter().find(|lx_buchungsblatt_bodenordnung| {
+            match verfahren.buchungsblatt_bodenordnung.iter().find(|lx_buchungsblatt_bodenordnung| {
                 lx_buchungsblatt_bodenordnung.ax_buchungsblatt.lan16 == bb.lan16 &&
                 lx_buchungsblatt_bodenordnung.ax_buchungsblatt.bbb == bb.bbb &&
                 lx_buchungsblatt_bodenordnung.ax_buchungsblatt.bbn == grundbuchblatt.titelblatt.blatt
@@ -1328,10 +1345,48 @@ fn generiere_ffa(
             }
         };
 
+        for a2 in grundbuchblatt.rechte.abt2.iter() {
+            let onr = match a2.nebenbeteiligter.ordnungsnummer.clone() {
+                Some(s) => s,
+                None => continue,
+            };
+
+            alle_ordnungsnummern
+            .entry(onr)
+            .or_insert_with(|| BTreeMap::new())
+            .entry(gbb_vorhanden.uuid.clone())
+            .or_insert_with(|| Vec::new())
+            .push((a2.nebenbeteiligter.clone(), (gbb_vorhanden.ax_buchungsblatt.lan16, gbb_vorhanden.ax_buchungsblatt.bbb)));
+        }
+
+        for a3 in grundbuchblatt.rechte.abt3.iter() {
+
+            let onr = match a3.nebenbeteiligter.ordnungsnummer.clone() {
+                Some(s) => s,
+                None => continue,
+            };
+
+            alle_ordnungsnummern
+            .entry(onr)
+            .or_insert_with(|| BTreeMap::new())
+            .entry(gbb_vorhanden.uuid.clone())
+            .or_insert_with(|| Vec::new())
+            .push((a3.nebenbeteiligter.clone(), (gbb_vorhanden.ax_buchungsblatt.lan16, gbb_vorhanden.ax_buchungsblatt.bbb)));
+        }
+
         'a2_inner: for a2_neu in grundbuchblatt.rechte.abt2.iter() {
 
             let neue_uuid = generiere_neue_uuid();
             let neue_buchungsstelle_uuid = generiere_neue_uuid();
+
+            let onr = match a2_neu.nebenbeteiligter.ordnungsnummer.clone() {
+                Some(s) => s,
+                None => continue,
+            };
+
+            ordnungsnummern_zu_rechte_map.entry(onr)
+            .or_insert_with(|| Vec::new())
+            .push(neue_uuid.clone());
 
             let mut grundstuecke_belastet = Vec::new();
             for belastet in a2_neu.belastete_flurstuecke.iter() {
@@ -1450,7 +1505,7 @@ fn generiere_ffa(
                             */
                             grundstuecke_belastet.push(ax.lx21008); 
                         } else {
-                            fsk_nicht_gefunden.entry((belastet_gemarkungsbezirk, belastet.flur, belastet.flurstueck.clone(), format!("{:?}", gemarkung_ids)))
+                            fsk_nicht_gefunden.entry((belastet_gemarkungsbezirk, belastet.flur, belastet.flurstueck.clone()))
                             .or_insert_with(|| Vec::new())
                             .push(format!("{} Blatt {} Abt. 2 Recht {}", 
                                 grundbuchblatt.titelblatt.grundbuch_von,
@@ -1461,7 +1516,7 @@ fn generiere_ffa(
                         }
                     },
                     None => {
-                        fsk_nicht_gefunden.entry((belastet_gemarkungsbezirk, belastet.flur, belastet.flurstueck.clone(), format!("{:?}", gemarkung_ids)))
+                        fsk_nicht_gefunden.entry((belastet_gemarkungsbezirk, belastet.flur, belastet.flurstueck.clone()))
                         .or_insert_with(|| Vec::new())
                         .push(format!("{} Blatt {} Abt. 2 Recht {}", 
                             grundbuchblatt.titelblatt.grundbuch_von,
@@ -1483,6 +1538,7 @@ fn generiere_ffa(
             }
 
             insert.push(FfaInsert::Abteilung2(FfaLxAbteilung2 {
+                grundbuch_name: grundbuch_name.clone(),
                 neue_uuid: neue_uuid,
                 beginnt_datum: jetzt.clone(),
                 kan: kan,
@@ -1513,6 +1569,15 @@ fn generiere_ffa(
             
             let neue_uuid = generiere_neue_uuid();
             let neue_buchungsstelle_uuid = generiere_neue_uuid();
+
+            let onr = match a3_neu.nebenbeteiligter.ordnungsnummer.clone() {
+                Some(s) => s,
+                None => continue,
+            };
+
+            ordnungsnummern_zu_rechte_map.entry(onr)
+            .or_insert_with(|| Vec::new())
+            .push(neue_uuid.clone());
 
             let mut grundstuecke_belastet = Vec::new();
             'a3_inner: for belastet in a3_neu.belastete_flurstuecke.iter() {
@@ -1629,7 +1694,7 @@ fn generiere_ffa(
                             */
                             grundstuecke_belastet.push(ax.lx21008);
                         } else {
-                            fsk_nicht_gefunden.entry((belastet_gemarkungsbezirk, belastet.flur, belastet.flurstueck.clone(), format!("{:?}", gemarkung_ids)))
+                            fsk_nicht_gefunden.entry((belastet_gemarkungsbezirk, belastet.flur, belastet.flurstueck.clone()))
                             .or_insert_with(|| Vec::new())
                             .push(format!("{} Blatt {} Abt. 3 Recht {}", 
                                 grundbuchblatt.titelblatt.grundbuch_von,
@@ -1640,7 +1705,7 @@ fn generiere_ffa(
                         }
                     },
                     None => {
-                        fsk_nicht_gefunden.entry((belastet_gemarkungsbezirk, belastet.flur, belastet.flurstueck.clone(), format!("{:?}", gemarkung_ids)))
+                        fsk_nicht_gefunden.entry((belastet_gemarkungsbezirk, belastet.flur, belastet.flurstueck.clone()))
                         .or_insert_with(|| Vec::new())
                         .push(format!("{} Blatt {} Abt. 3 Recht {}", 
                             grundbuchblatt.titelblatt.grundbuch_von,
@@ -1662,6 +1727,7 @@ fn generiere_ffa(
             }
 
             insert.push(FfaInsert::Abteilung3(FfaLxAbteilung3 {
+                grundbuch_name: grundbuch_name.clone(),
                 neue_uuid,
                 beginnt_datum: jetzt.clone(),
                 kan: kan, 
@@ -1739,6 +1805,8 @@ fn generiere_ffa(
                     }); 
                 } else {
                     delete.push(FfaDelete::Abteilung2 { 
+                        grundbuch_name: grundbuch_name.clone(),
+                        lfd_nr: abt2.lfd_nr,
                         uuid: abt2.uuid.clone(),
                         erstellt_am: abt2.erstellt_am.clone(), 
                     }); 
@@ -1773,7 +1841,10 @@ fn generiere_ffa(
                         insert: insert_buchungsstelle,
                     }); 
                 } else {
-                    delete.push(FfaDelete::Abteilung3 { 
+                    println!("lösche abt3 = {:#?}, buchungsstelle = {:#?}", abt3, buchungsstelle);
+                    delete.push(FfaDelete::Abteilung3 {
+                        grundbuch_name: grundbuch_name.clone(),
+                        lfd_nr: abt3.lfd_nr,
                         uuid: abt3.uuid.clone(),
                         erstellt_am: abt3.erstellt_am.clone(), 
                     });
@@ -1790,9 +1861,219 @@ fn generiere_ffa(
         global_delete.append(&mut delete);
     }
 
-    for ((gmk, flur, flurstueck, fsk), rechte) in fsk_nicht_gefunden {
-        warnungen.push(format!("Gemarkung {} Flur {} Flurstück {} nicht gefunden\r\n(ID {}), benötigt von:\r\n{}",
-            gmk, flur, flurstueck, fsk, rechte.into_iter().map(|r| format!("    {}", r)).collect::<Vec<_>>().join("\r\n")
+    // Jeder NB sollte exakt eine Ordnungsnummer haben
+    let mut ordnungsnummer_nb_map = BTreeMap::new();
+    for (onr, onr_rechte) in alle_ordnungsnummern {
+
+        let mut nb_pro_onr = onr_rechte
+            .iter()
+            .flat_map(|(k, v)| v.clone().into_iter())
+            .collect::<Vec<_>>();
+
+        nb_pro_onr.sort();
+        dedup_by::dedup_by(&mut nb_pro_onr, |a, b| {
+            a.0.name == b.0.name
+        });
+
+        if nb_pro_onr.len() > 1 {
+            warnungen.push(format!("Kann Ordnungsnummer {}/00 nicht ersetzen: Mehr als ein Nebenbeteiliger für Ordnungsnummer: {:?}", onr, 
+                nb_pro_onr
+            ));
+            continue;
+        }
+
+        let (nb, (lan16, bbb)) = match nb_pro_onr.first() {
+            Some((nb, gmk)) => (nb.clone(), gmk.clone()),
+            None => {
+                warnungen.push(format!("Kann Ordnungsnummer {}/00 nicht ersetzen: Kein Nebenbeteiliger in Grundbuch?", onr));
+                continue;
+            }
+        };
+
+        ordnungsnummer_nb_map.insert(onr, (nb, lan16, bbb));
+    }
+
+    // Ordnungsnummer ("817000") zu LxOrdnungsnummerBodenOrdnung UUID ("DE....")
+    // Nötig, um Verbindung zw. Recht -> Rechtsinhaber (Ordnungsnummer) zu erstellen
+    let mut onr_zu_lx_ordnungsnummer_bodenordnung_map = BTreeMap::new();
+
+    for (onr, (nb, lan16, bbb)) in ordnungsnummer_nb_map {
+
+        let onr_existiert = verfahren.ordnungsnummern.iter().find(|o| {
+            onr == o.stammnummer &&
+            o.unternummer == 0
+        }).cloned();
+
+        match onr_existiert {
+            Some(s) => {
+
+                let namensnummern_fuer_ordnungsnummer = s.get_lx_namensnummern();
+                if namensnummern_fuer_ordnungsnummer.len() > 1 {
+                    // Irgendwas falsch: NB sollten nur eine Namensnummer haben
+                    warnungen.push(format!("Kann Ordnungsnummer {}/00 nicht ersetzen: Mehr als eine Namensnummer in LX_BuchungsblattBodenordnung", onr));
+                }
+
+                let person_rolle = match namensnummern_fuer_ordnungsnummer.first().and_then(|f| {
+                    verfahren.personen_rollen.iter().find(|pr| pr.lx_namensnummer_uuid == *f)
+                }) {
+                    Some(s) => s.clone(),
+                    None => {
+                        warnungen.push(format!("Kann Ordnungsnummer {}/00 nicht ersetzen: Keine LX_PersonRolle für LX_Namensnummer {:?}", 
+                            onr, namensnummern_fuer_ordnungsnummer
+                        ));
+                        continue;
+                    }
+                };
+
+                let lx_person = match verfahren.personen.iter().find(|p| p.uuid == person_rolle.person_uuid) {
+                    Some(s) => s.clone(),
+                    None => {
+                        warnungen.push(format!("Kann Ordnungsnummer {}/00 nicht ersetzen: Keine LX_Person für LX_PersonRolle {}", 
+                            onr, person_rolle.uuid
+                        ));
+                        continue;
+                    }
+                };
+
+                onr_zu_lx_ordnungsnummer_bodenordnung_map.insert(onr, s.uuid);
+
+                global_replace.push(FfaReplace::NebenbeteiligterReplace {
+                    lx_person_rolle_erstellt_am: person_rolle.beg.clone(),
+                    lx_person_rolle: FfaLxPersonRolle {
+                        personenrolle_uuid: person_rolle.uuid.clone(),
+                        beginnt_datum: jetzt.clone(),
+                        kan: KennzeichnungAlterNeuerBestand::AlterBestand,
+                        verfahren_uuid: verfahren.uuid.clone(),
+                    },
+
+                    lx_person_erstellt_am: lx_person.beg.clone(),
+                    lx_person: FfaLxPerson {
+                        lx_person_uuid: lx_person.uuid.clone(),
+                        beginnt_datum: jetzt.clone(),
+                        verfahren_uuid: verfahren.uuid.clone(),
+                        personenrolle_uuid: person_rolle.uuid.clone(),
+                        ax_person_uuid: lx_person.ax_person.uuid.clone(),
+                    },
+
+                    ax_person_erstellt_am: lx_person.ax_person.beg.clone(),
+                    ax_person: FfaAxPerson {
+                        ax_person_uuid: lx_person.ax_person.uuid.clone(),
+                        beginnt_datum: jetzt.clone(),
+                        nachname_oder_firma: nb.name.trim().to_string(),        // <-- nur Nachname wird geändert!
+                        anrede: lx_person.ax_person.anrede.clone(),
+                        vorname: lx_person.ax_person.vorname.clone().unwrap_or_default(),
+                        titel: lx_person.ax_person.titel.clone().unwrap_or_default(),
+                        geburtsname: lx_person.ax_person.geburtsname.clone().unwrap_or_default(),
+                        wohnort: lx_person.ax_person.wohnort.clone().unwrap_or_default(),
+                    },
+                });
+            },
+            None => {
+
+                let ordnungsnummer_bodenordnung_uuid = generiere_neue_uuid();
+                onr_zu_lx_ordnungsnummer_bodenordnung_map.insert(onr, ordnungsnummer_bodenordnung_uuid.clone());
+
+                global_insert.push(FfaInsert::NebenbeteiligterNeu(FfaLxOrdnungsNummer {
+                    ordnungsnummer_bodenordnung_uuid,
+                    beginnt_datum: jetzt.clone(),
+                    kan: KennzeichnungAlterNeuerBestand::AlterBestand,
+                    verfahren_uuid: verfahren.uuid.clone(),
+                    stammnummer: onr,
+                    unternummer: 0,
+                    personenrolle_uuid: generiere_neue_uuid(),
+                    lx_person_uuid: generiere_neue_uuid(),
+                    ax_person_uuid: generiere_neue_uuid(),
+                    nachname_oder_firma: nb.name.trim().to_string(),
+                    anrede: Some(Anrede::Firma), // TODO - ???
+                    vorname: String::new(),
+                    titel: String::new(),
+                    geburtsname: String::new(),
+                    wohnort: String::new(),
+                    buchungsblatt_uuid: generiere_neue_uuid(),
+                    bb_land: lan16.to_string(),
+                    bb_bezirk: bbb.to_string(),
+                    bbn_mit_erweiterung: format!("v00001"), // TODO - ???
+                    buchungsblatt_bodenordnung_uuid: generiere_neue_uuid(),
+                    ax_namensnummer_uuid: generiere_neue_uuid(),
+                    lx_namensnummer_uuid: generiere_neue_uuid(),
+                }));
+            }
+        }
+    }
+
+    // ordnungsnummern_zu_rechte_map
+    for (ordnungsnummer, rechte) in ordnungsnummern_zu_rechte_map {
+        
+        let lx_ordnungsnummer_bodenordnung = match onr_zu_lx_ordnungsnummer_bodenordnung_map.get(&ordnungsnummer) {
+            Some(s) => s,
+            None => {
+                warnungen.push(format!("Konnte keine LxOrdnungsnummerBodenordnung für {}/00 finden.", ordnungsnummer));
+                continue; 
+            },
+        };
+
+        for recht_uuid in rechte {
+            for insert in global_insert.iter_mut() {
+                match insert {
+                    FfaInsert::Abteilung2(i) => {
+                        if i.neue_uuid != recht_uuid { continue; }
+                        i.rechtsinhaber.push(lx_ordnungsnummer_bodenordnung.clone());
+                        i.rechtsinhaber.sort();
+                        i.rechtsinhaber.dedup();
+                    },
+                    FfaInsert::Abteilung3(i) => {
+                        if i.neue_uuid != recht_uuid { continue; }
+                        i.rechtsinhaber.push(lx_ordnungsnummer_bodenordnung.clone());
+                        i.rechtsinhaber.sort();
+                        i.rechtsinhaber.dedup();
+                    },
+                    _ => { },
+                }
+            }
+            for replace in global_replace.iter_mut() {
+                match replace {
+                    FfaReplace::Abteilung2 { insert, .. } => {
+                        if insert.neue_uuid != recht_uuid { continue; }
+                        insert.rechtsinhaber.push(lx_ordnungsnummer_bodenordnung.clone());
+                        insert.rechtsinhaber.sort();
+                        insert.rechtsinhaber.dedup();
+                    },
+                    FfaReplace::Abteilung3 { insert, .. } => {
+                        if insert.neue_uuid != recht_uuid { continue; }
+                        insert.rechtsinhaber.push(lx_ordnungsnummer_bodenordnung.clone());
+                        insert.rechtsinhaber.sort();
+                        insert.rechtsinhaber.dedup();
+                    },
+                    _ => { },
+                }
+            }
+        }
+    }
+
+    for i in &global_insert {
+        let (ri, desc) = match i {
+            FfaInsert::Abteilung2(i) => (&i.rechtsinhaber, &i.grundbuch_name),
+            FfaInsert::Abteilung3(i) => (&i.rechtsinhaber, &i.grundbuch_name),
+            _ => { continue; },
+        };
+        if ri.is_empty() {
+            warnungen.push(format!("Recht {} hat keine Rechtsinhaber", desc));
+        }
+    }
+    for r in &global_replace {
+        let (ri, desc) = match r {
+            FfaReplace::Abteilung2 { insert, .. } => (&insert.rechtsinhaber, &insert.grundbuch_name),
+            FfaReplace::Abteilung3 { insert, .. } => (&insert.rechtsinhaber, &insert.grundbuch_name),
+            _ => { continue; },
+        };
+        if ri.is_empty() {
+            warnungen.push(format!("Recht {} hat keine Rechtsinhaber", desc));
+        }
+    }
+
+    for ((gmk, flur, flurstueck), rechte) in fsk_nicht_gefunden {
+        warnungen.push(format!("Gemarkung {} Fl. {} Flst. {} nicht gefunden, benötigt von:\r\n{}",
+            gmk, flur, flurstueck, rechte.into_iter().map(|r| format!("    {}", r)).collect::<Vec<_>>().join("\r\n")
         ));
     }
 
@@ -1915,12 +2196,237 @@ extern "C" fn writeback_callback(
     aktives_verfahren.auftragsstatus = match &mut *incoming_data {
         Fortgefuehrt { .. } => Some(Auftragsstatus::ErfolgreichFortgefuehrt),
         FortschrittUpdate { prozent, .. } => Some(Auftragsstatus::AuftragWirdFortgefuehrt { prozent: *prozent }),
-        Fehler { text, .. } => Some(Auftragsstatus::Fehler { text: text.clone() }),
+        Fehler { log, .. } => Some(Auftragsstatus::Fehler { log: log.clone() }),
     };
 
     Update::RefreshDom
 }
 
+
+pub fn render_konfigurations_dialog(app_data: RefAny, data: &LefisUploadKonfiguration) -> Dom {
+    
+    use azul::widgets::{Button, TextInput, NumberInput, CheckBox};
+
+    fn render_row(s: &'static str, data: Dom) -> Dom {
+        div::render()
+        .with_inline_style("flex-grow:0;flex-direction:row;margin-bottom:5px;".into())
+        .with_children(vec![
+            p::render(s.into())
+            .with_inline_style("width:100px;font-family:sans-serif;font-size:11px;".into()),
+            div::render()
+            .with_inline_style("flex-grow:1;".into()),
+            Dom::div()
+            .with_inline_style("width:200px;".into())
+            .with_child(data),
+        ].into())
+    }
+
+    Dom::body()
+    .with_inline_style("padding:10px;".into())
+    .with_children(DomVec::from_vec(vec![
+        render_row("HTTPS benutzen", 
+            CheckBox::new(data.lefis.https)
+            .with_on_toggle(app_data.clone(), konfigurations_https_bearbeiten)
+            .dom()
+        ),
+        render_row("Host", 
+            TextInput::new()
+            .with_text(data.lefis.host.clone().into())
+            .with_on_focus_lost(app_data.clone(), konfiguration_host_bearbeiten)
+            .dom()
+        ),
+        render_row("Port", 
+            NumberInput::new(data.lefis.port as f32)
+            .with_on_focus_lost(app_data.clone(), konfiguration_port_bearbeiten)
+            .dom()
+        ),
+        render_row("Service", 
+            TextInput::new()
+            .with_text(data.lefis.service.clone().into())
+            .with_on_focus_lost(app_data.clone(), konfiguration_service_bearbeiten)
+            .dom()
+        ),
+        render_row("Benutzer", 
+            TextInput::new()
+            .with_text(data.lefis.benutzer.clone().unwrap_or_default().into())
+            .with_on_focus_lost(app_data.clone(), konfiguration_benutzer_bearbeiten)
+            .dom()
+        ),
+        render_row("Passwort", 
+            TextInput::new()
+            .with_text(data.lefis.passwort.clone().unwrap_or_default().clone().into())
+            .with_on_focus_lost(app_data.clone(), konfiguration_passwort_bearbeiten)
+            .dom()
+        ),
+        div::render()
+        .with_inline_style("flex-grow:1;".into()),
+        div::render()
+        .with_inline_style("flex-grow:0;flex-direction:row;".into())
+        .with_children(vec![
+            Button::new("Verbindung testen".into())
+            .with_on_click(app_data.clone(), konfiguration_verbindung_testen)
+            .dom()
+            .with_inline_style("margin-right:50px;".into()),
+            div::render()
+            .with_inline_style("flex-grow:1;".into()),
+            Button::new("Speichern".into())
+            .with_on_click(app_data.clone(), konfiguration_speichern)
+            .dom(),
+        ].into()),
+    ]))
+}
+
+use azul::callbacks::LayoutCallbackInfo;
+use azul::style::StyledDom;
+use azul::window::WindowCreateOptions;
+
+extern "C" 
+fn konfigurations_https_bearbeiten(data: &mut RefAny, _: &mut CallbackInfo, c: &CheckBoxState) -> Update {
+    
+    let mut data = match data.downcast_mut::<AppData>() {
+        Some(s) => s,
+        None => { return Update::DoNothing; },
+    };
+
+    data.konfiguration.lefis.https = c.checked;
+
+    Update::DoNothing
+}
+
+extern "C" 
+fn konfiguration_host_bearbeiten(data: &mut RefAny, _: &mut CallbackInfo, ts: &TextInputState) -> Update {
+    
+    let mut data = match data.downcast_mut::<AppData>() {
+        Some(s) => s,
+        None => { return Update::DoNothing; },
+    };
+
+    let t = ts.get_text().as_str().trim().to_string();
+    data.konfiguration.lefis.host = t;
+
+    Update::DoNothing
+}
+
+
+extern "C" 
+fn konfiguration_port_bearbeiten(data: &mut RefAny, _: &mut CallbackInfo, n: &NumberInputState) -> Update {
+    
+    let mut data = match data.downcast_mut::<AppData>() {
+        Some(s) => s,
+        None => { return Update::DoNothing; },
+    };
+
+    data.konfiguration.lefis.port = n.number.abs().round() as usize;
+
+    Update::DoNothing
+}
+
+extern "C" 
+fn konfiguration_service_bearbeiten(data: &mut RefAny, _: &mut CallbackInfo, ts: &TextInputState) -> Update {
+    
+    let mut data = match data.downcast_mut::<AppData>() {
+        Some(s) => s,
+        None => { return Update::DoNothing; },
+    };
+
+    let t = ts.get_text().as_str().trim().to_string();
+    data.konfiguration.lefis.service = t;
+
+    Update::DoNothing
+}
+
+extern "C" 
+fn konfiguration_benutzer_bearbeiten(data: &mut RefAny, _: &mut CallbackInfo, ts: &TextInputState) -> Update {
+    
+    let mut data = match data.downcast_mut::<AppData>() {
+        Some(s) => s,
+        None => { return Update::DoNothing; },
+    };
+
+    let t = ts.get_text().as_str().trim().to_string();
+    data.konfiguration.lefis.benutzer = if t.is_empty() { None } else { Some(t) };
+
+    Update::DoNothing
+}
+
+extern "C" 
+fn konfiguration_passwort_bearbeiten(data: &mut RefAny, _: &mut CallbackInfo, ts: &TextInputState) -> Update {
+    
+    let mut data = match data.downcast_mut::<AppData>() {
+        Some(s) => s,
+        None => { return Update::DoNothing; },
+    };
+
+    let t = ts.get_text().as_str().trim().to_string();
+    data.konfiguration.lefis.passwort = if t.is_empty() { None } else { Some(t) };
+
+    Update::DoNothing
+}
+
+extern "C" 
+fn konfiguration_verbindung_testen(data: &mut RefAny, info: &mut CallbackInfo) -> Update {
+    
+    use azul::dialog::MsgBox;
+    use crate::LefisInfo;
+
+    let data = match data.downcast_ref::<AppData>() {
+        Some(s) => s,
+        None => { return Update::DoNothing; },
+    };
+
+    match LefisInfo::new(&data.konfiguration.lefis) {
+        Ok(o) => {
+            MsgBox::info(format!("Verbindung erfolgreich!").into());
+        },
+        Err(e) => {
+            MsgBox::error(format!("Fehler beim Auslesen der Oracle-Zugangsdaten: {}", e).into());
+        },
+    }
+
+    Update::DoNothing
+}
+
+extern "C" 
+fn konfiguration_speichern(data: &mut RefAny, info: &mut CallbackInfo) -> Update {
+
+    {
+        let data = match data.downcast_ref::<AppData>() {
+            Some(s) => s,
+            None => { return Update::DoNothing; },
+        };
+        
+        data.konfiguration.speichern();
+    }
+
+    verfahren_neu_laden(data, info)
+}
+
+extern "C" fn konfigurations_dialog(data: &mut RefAny, _: &mut LayoutCallbackInfo) -> StyledDom {
+    let data_clone = data.clone();
+    let data = match data.downcast_ref::<AppData>() {
+        Some(s) => s,
+        None => return StyledDom::default(),
+    };
+
+    crate::ui::render_konfigurations_dialog(data_clone, &data.konfiguration)
+    .style(Css::empty())
+}
+
+extern "C"
+fn oeffne_konfiguration_editor(_: &mut RefAny, info: &mut CallbackInfo) -> Update {
+    info.create_window(konfiguration_fenster());
+    Update::RefreshDom
+}
+
+pub fn konfiguration_fenster() -> WindowCreateOptions {
+    let mut window = WindowCreateOptions::new(konfigurations_dialog);
+    window.state.title = "DHK-Verbindung".into();
+    window.state.size.dimensions.width = 400.0;
+    window.state.size.dimensions.height = 300.0;
+    window.state.flags.is_always_on_top = true;
+    window.state.flags.is_resizable = false;
+    window
+}
 
 pub fn render(app_data: RefAny, data: &AppData) -> Dom {
     use azul::menu::*;
@@ -1929,9 +2435,13 @@ pub fn render(app_data: RefAny, data: &AppData) -> Dom {
     .with_menu_bar(Menu::new({
 
         let mut menu = vec![
-            MenuItem::String(StringMenuItem::new("Verfahren".into()).with_children(vec![
+            MenuItem::String(StringMenuItem::new("Programm".into()).with_children(vec![
                 MenuItem::String(
-                    StringMenuItem::new("Neu laden".into())
+                    StringMenuItem::new("Konfiguration".into())
+                    .with_callback(app_data.clone(), oeffne_konfiguration_editor)
+                ),
+                MenuItem::String(
+                    StringMenuItem::new("Verfahren neu laden".into())
                     .with_callback(app_data.clone(), verfahren_neu_laden)
                 )
             ].into()))
@@ -1989,7 +2499,7 @@ fn verfahren_neu_laden(app_data: &mut RefAny, _: &mut CallbackInfo) -> Update {
             let lefis_info = match LefisInfo::new(&o.lefis) {
                 Ok(o) => Some(o),
                 Err(e) => {
-                    MsgBox::error(format!("Fehler beim Auslesen der Oracle-Zugangsdaten: {:?}", e).into());
+                    MsgBox::error(format!("Fehler beim Auslesen der Oracle-Zugangsdaten: {}", e).into());
                     return Update::DoNothing;
                 },
             };
@@ -2006,7 +2516,7 @@ fn verfahren_neu_laden(app_data: &mut RefAny, _: &mut CallbackInfo) -> Update {
         Some(s) => match DhkVerbindung::new(&s.oracle) {
             Ok(o) => Some(o),
             Err(e) => {
-                MsgBox::error(format!("Fehler beim Verbinden mit Oracle-Datenbank: {:#?} - {}", s, e).into());
+                MsgBox::error(format!("Fehler beim Verbinden mit Oracle-Datenbank: {:#?} - {}", s.oracle, e).into());
                 return Update::DoNothing;
             }
         },
@@ -2031,5 +2541,5 @@ fn verfahren_neu_laden(app_data: &mut RefAny, _: &mut CallbackInfo) -> Update {
     
     MsgBox::info("OK - Verfahren wurden neu geladen.".into());
 
-    return Update::RefreshDom;
+    return Update::RefreshDomAllWindows;
 }
