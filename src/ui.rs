@@ -647,7 +647,6 @@ fn render_verfahren_info(app_data: RefAny, data: &AppData) -> Dom {
                 format!("Abgeglichen"),
                 format!("Blatt"),
                 format!("Nr."),
-                format!("Anzahl Rechte"),
             ].into())
             .with_rows(ausgewaehltes_verfahren.buchungsblatt_bodenordnung.iter().take(20).map(|gb| {
                 ListViewRow {
@@ -655,7 +654,6 @@ fn render_verfahren_info(app_data: RefAny, data: &AppData) -> Dom {
                         CheckBox::new(gb.grundbuchvergleich_durchgefuehrt).dom(),
                         p::render(gb.ax_buchungsblatt.bbb_name.clone().unwrap_or_default().into()),
                         p::render(format!("{}", gb.ax_buchungsblatt.bbn).into()),
-                        p::render(format!("{}", gb.ax_buchungsblatt.ax_buchungsstellen.len()).into()),
                     ].into(),
                     height: None.into(),
                 }
@@ -1305,6 +1303,9 @@ fn generiere_ffa(
     let mut alle_ordnungsnummern = BTreeMap::new();
     let mut ordnungsnummern_zu_rechte_map = BTreeMap::new();
 
+    let mut bereits_gelöscht_abt3 = BTreeSet::new();
+    let mut bereits_gelöscht_abt2 = BTreeSet::new();
+
     for grundbuchblatt in lefis_geladen.iter() {
 
         let grundbuch_name = format!("{} Blatt {}", grundbuchblatt.titelblatt.grundbuch_von, grundbuchblatt.titelblatt.blatt);
@@ -1543,7 +1544,7 @@ fn generiere_ffa(
                 beginnt_datum: jetzt.clone(),
                 kan: kan,
                 verfahren_uuid: verfahren.uuid.clone(),
-                rechtsinhaber: Vec::new(), // TODO
+                rechtsinhaber: Vec::new(), // wird in späterem Schritt ausgefüllt
                 buchungsstelle_uuid: neue_buchungsstelle_uuid.clone(),
                 lfd_nr: a2_neu.lfd_nr,
                 textlicher_teil: if kurztexte_benutzen {
@@ -1712,7 +1713,7 @@ fn generiere_ffa(
                             grundbuchblatt.titelblatt.blatt,
                             a3_neu.lfd_nr 
                         ));
-                        continue 'a3_outer;
+                        continue 'a3_inner;
                     },
                 }
             }
@@ -1732,7 +1733,7 @@ fn generiere_ffa(
                 beginnt_datum: jetzt.clone(),
                 kan: kan, 
                 verfahren_uuid: verfahren.uuid.clone(),
-                rechtsinhaber: Vec::new(), // TODO
+                rechtsinhaber: Vec::new(), // wird in späterem Schritt ausgefüllt
                 buchungsstelle_uuid: neue_buchungsstelle_uuid.clone(),
                 lfd_nr: a3_neu.lfd_nr,
                 textlicher_teil:  if kurztexte_benutzen {
@@ -1753,106 +1754,139 @@ fn generiere_ffa(
             }));
         }
 
-        for ax_buchungsstelle in gbb_vorhanden.ax_buchungsblatt.ax_buchungsstellen.iter()
-        // Wichtig: NIEMALS Rechte des NB löschen
-        .filter_map(|bb| if bb.kan == KennzeichnungAlterNeuerBestand::AlterBestand { Some(bb.uuid.clone()) } else { None }) {
+        for abt2 in verfahren.abt2_rechte.iter() {
             
-            let abt2_found = verfahren.abt2_rechte
-                .iter()
-                .find_map(|a2| {
-                    a2.buchungsstellen
-                    .iter()
-                    .find(|bs| bs.ax21008 == *ax_buchungsstelle)
-                    .map(|b| (a2.clone(), b.clone()))
-                });
+            if abt2.ende.is_some() {
+                continue;
+            }
 
+            if bereits_gelöscht_abt2.contains(&abt2.uuid) {
+                continue;
+            }
 
-            let abt3_found = verfahren.abt3_rechte
-                .iter()
-                .find_map(|a3| {
-                    a3.buchungsstellen
-                    .iter()
-                    .find(|bs| bs.ax21008 == *ax_buchungsstelle)
-                    .map(|b| (a3.clone(), b.clone()))
-                });
-
-            if let Some((abt2, buchungsstelle)) = abt2_found {
-
-                // Wenn bereits ein insert existiert, Recht nicht 
-                // löschen sondern ersetzen
-                if let Some(insert_idx) = insert.iter().position(|i| match i {
-                    FfaInsert::Abteilung2(FfaLxAbteilung2 { lfd_nr, .. }) => *lfd_nr == abt2.lfd_nr,
-                    _ => false,
-                }) {
-                    let insert_buchungsstelle = match insert.remove(insert_idx + 1) {
-                         FfaInsert::BuchungsstelleBelastetAbt2(a) => a,
-                         _ => continue,
-                    };
-                    let insert = match insert.remove(insert_idx) {
-                         FfaInsert::Abteilung2(a) => a,
-                         _ => continue,
-                    };
-
-                    replace.push(FfaReplace::Abteilung2 { 
-                        uuid: abt2.uuid.clone(),
-                        erstellt_am: abt2.erstellt_am.clone(), 
-                        insert,
-                    }); 
-                    replace.push(FfaReplace::BuchungsstelleBelastetAbt2 {
-                        uuid: buchungsstelle.lx21004.clone(),
-                        erstellt_am: buchungsstelle.lx21004_erstellt_am.clone(), 
-                        insert: insert_buchungsstelle,
-                    }); 
-                } else {
-                    delete.push(FfaDelete::Abteilung2 { 
-                        grundbuch_name: grundbuch_name.clone(),
-                        lfd_nr: abt2.lfd_nr,
-                        uuid: abt2.uuid.clone(),
-                        erstellt_am: abt2.erstellt_am.clone(), 
-                    }); 
-                    delete.push(FfaDelete::BuchungsstelleBelastet { 
-                        uuid: buchungsstelle.lx21004.clone(),
-                        erstellt_am: buchungsstelle.lx21004_erstellt_am.clone(), 
-                    });
+            let buchungsstelle = match abt2.buchungsstellen.len() {
+                0 => { continue; },
+                1 => {
+                    abt2.buchungsstellen[0].clone()
+                },
+                _ => {
+                    warnungen.push(format!("{} Abteilung 2 lfd. Nr. {} hat mehr als eine Grundbuchblatt-Buchungsstelle?", grundbuch_name, abt2.lfd_nr));
+                    continue;
                 }
-            } else if let Some((abt3, buchungsstelle)) = abt3_found {
+            };
 
-                if let Some(insert_idx) = insert.iter().position(|i| match i {
-                    FfaInsert::Abteilung3(FfaLxAbteilung3 { lfd_nr, .. }) => *lfd_nr == abt3.lfd_nr,
-                    _ => false,
-                }) {
-                    let insert_buchungsstelle = match insert.remove(insert_idx + 1) {
-                        FfaInsert::BuchungsstelleBelastetAbt3(a) => a,
-                        _ => continue,
-                    };
-                    let insert = match insert.remove(insert_idx) {
-                        FfaInsert::Abteilung3(a) => a,
-                        _ => continue,
-                    };
+            if buchungsstelle.ax21007 != gbb_vorhanden.ax_buchungsblatt.uuid {
+                continue;
+            }
 
-                    replace.push(FfaReplace::Abteilung3 { 
-                        uuid: abt3.uuid.clone(),
-                        erstellt_am: abt3.erstellt_am.clone(), 
-                        insert,
-                    }); 
-                    replace.push(FfaReplace::BuchungsstelleBelastetAbt3 {
-                        uuid: buchungsstelle.lx21004.clone(),
-                        erstellt_am: buchungsstelle.lx21004_erstellt_am.clone(), 
-                        insert: insert_buchungsstelle,
-                    }); 
-                } else {
-                    println!("lösche abt3 = {:#?}, buchungsstelle = {:#?}", abt3, buchungsstelle);
-                    delete.push(FfaDelete::Abteilung3 {
-                        grundbuch_name: grundbuch_name.clone(),
-                        lfd_nr: abt3.lfd_nr,
-                        uuid: abt3.uuid.clone(),
-                        erstellt_am: abt3.erstellt_am.clone(), 
-                    });
-                    delete.push(FfaDelete::BuchungsstelleBelastet { 
-                        uuid: buchungsstelle.lx21004.clone(),
-                        erstellt_am: buchungsstelle.lx21004_erstellt_am.clone(), 
-                    });
+            bereits_gelöscht_abt2.insert(abt2.uuid.clone());
+
+            // Wenn bereits ein insert existiert, Recht nicht 
+            // löschen sondern ersetzen
+            if let Some(insert_idx) = insert.iter().position(|i| match i {
+                FfaInsert::Abteilung2(FfaLxAbteilung2 { lfd_nr, .. }) => *lfd_nr == abt2.lfd_nr,
+                _ => false,
+            }) {
+                let insert_buchungsstelle = match insert.remove(insert_idx + 1) {
+                     FfaInsert::BuchungsstelleBelastetAbt2(a) => a,
+                     _ => continue,
+                };
+                let insert = match insert.remove(insert_idx) {
+                     FfaInsert::Abteilung2(a) => a,
+                     _ => continue,
+                };
+
+                replace.push(FfaReplace::Abteilung2 {
+                    grundbuch_name: grundbuch_name.clone(),
+                    lfd_nr: abt2.lfd_nr,
+                    uuid: abt2.uuid.clone(),
+                    erstellt_am: abt2.erstellt_am.clone(), 
+                    insert,
+                }); 
+                replace.push(FfaReplace::BuchungsstelleBelastetAbt2 {
+                    uuid: buchungsstelle.lx21004.clone(),
+                    erstellt_am: buchungsstelle.lx21004_erstellt_am.clone(), 
+                    insert: insert_buchungsstelle,
+                }); 
+            } else {
+                delete.push(FfaDelete::Abteilung2 { 
+                    grundbuch_name: grundbuch_name.clone(),
+                    lfd_nr: abt2.lfd_nr,
+                    uuid: abt2.uuid.clone(),
+                    erstellt_am: abt2.erstellt_am.clone(), 
+                }); 
+                delete.push(FfaDelete::BuchungsstelleBelastet { 
+                    uuid: buchungsstelle.lx21004.clone(),
+                    erstellt_am: buchungsstelle.lx21004_erstellt_am.clone(), 
+                });
+            }
+        }
+
+        for abt3 in verfahren.abt3_rechte.iter() {
+            
+            if abt3.ende.is_some() {
+                continue;
+            }
+
+            if bereits_gelöscht_abt3.contains(&abt3.uuid) {
+                continue;
+            }
+
+            let buchungsstelle = match abt3.buchungsstellen.len() {
+                0 => { continue; },
+                1 => {
+                    abt3.buchungsstellen[0].clone()
+                },
+                _ => {
+                    warnungen.push(format!("{} Abteilung 3 lfd. Nr. {} hat mehr als eine Grundbuchblatt-Buchungsstelle?", grundbuch_name, abt3.lfd_nr));
+                    continue;
                 }
+            };
+
+            if buchungsstelle.ax21007 != gbb_vorhanden.ax_buchungsblatt.uuid {
+                continue;
+            }
+
+            let position = insert.iter().position(|i| match i {
+                FfaInsert::Abteilung3(FfaLxAbteilung3 { lfd_nr, .. }) => *lfd_nr == abt3.lfd_nr,
+                _ => false,
+            });
+            
+            bereits_gelöscht_abt3.insert(abt3.uuid.clone());
+
+            if let Some(insert_idx) = position {
+                let insert_buchungsstelle = match insert.remove(insert_idx + 1) {
+                    FfaInsert::BuchungsstelleBelastetAbt3(a) => a,
+                    _ => continue,
+                };
+                let insert = match insert.remove(insert_idx) {
+                    FfaInsert::Abteilung3(a) => a,
+                    _ => continue,
+                };
+
+                replace.push(FfaReplace::Abteilung3 { 
+                    grundbuch_name: grundbuch_name.clone(),
+                    lfd_nr: abt3.lfd_nr,
+                    uuid: abt3.uuid.clone(),
+                    erstellt_am: abt3.erstellt_am.clone(), 
+                    insert,
+                }); 
+                replace.push(FfaReplace::BuchungsstelleBelastetAbt3 {
+                    uuid: buchungsstelle.lx21004.clone(),
+                    erstellt_am: buchungsstelle.lx21004_erstellt_am.clone(), 
+                    insert: insert_buchungsstelle,
+                }); 
+            } else {
+                delete.push(FfaDelete::Abteilung3 {
+                    grundbuch_name: grundbuch_name.clone(),
+                    lfd_nr: abt3.lfd_nr,
+                    uuid: abt3.uuid.clone(),
+                    erstellt_am: abt3.erstellt_am.clone(), 
+                });
+                delete.push(FfaDelete::BuchungsstelleBelastet { 
+                    uuid: buchungsstelle.lx21004.clone(),
+                    erstellt_am: buchungsstelle.lx21004_erstellt_am.clone(), 
+                });
             }
         }
 
@@ -1938,6 +1972,7 @@ fn generiere_ffa(
                 onr_zu_lx_ordnungsnummer_bodenordnung_map.insert(onr, s.uuid);
 
                 global_replace.push(FfaReplace::NebenbeteiligterReplace {
+                    nebenbeteiligter_stammnr: onr,
                     lx_person_rolle_erstellt_am: person_rolle.beg.clone(),
                     lx_person_rolle: FfaLxPersonRolle {
                         personenrolle_uuid: person_rolle.uuid.clone(),
@@ -1959,12 +1994,14 @@ fn generiere_ffa(
                     ax_person: FfaAxPerson {
                         ax_person_uuid: lx_person.ax_person.uuid.clone(),
                         beginnt_datum: jetzt.clone(),
-                        nachname_oder_firma: nb.name.trim().to_string(),        // <-- nur Nachname wird geändert!
-                        anrede: lx_person.ax_person.anrede.clone(),
-                        vorname: lx_person.ax_person.vorname.clone().unwrap_or_default(),
-                        titel: lx_person.ax_person.titel.clone().unwrap_or_default(),
-                        geburtsname: lx_person.ax_person.geburtsname.clone().unwrap_or_default(),
-                        wohnort: lx_person.ax_person.wohnort.clone().unwrap_or_default(),
+                        
+                        anrede: nb.extra.anrede.clone(),
+                        titel: nb.extra.titel.clone().unwrap_or_default(),
+                        vorname: nb.extra.vorname.clone().unwrap_or_default(),
+                        nachname_oder_firma: nb.extra.nachname_oder_firma.unwrap_or(nb.name.trim().to_string()),
+                        geburtsname: nb.extra.geburtsname.clone().unwrap_or_default(),
+                        geburtsdatum: nb.extra.geburtsdatum.clone(),
+                        wohnort: nb.extra.wohnort.clone().unwrap_or_default(),
                     },
                 });
             },
@@ -1983,16 +2020,19 @@ fn generiere_ffa(
                     personenrolle_uuid: generiere_neue_uuid(),
                     lx_person_uuid: generiere_neue_uuid(),
                     ax_person_uuid: generiere_neue_uuid(),
-                    nachname_oder_firma: nb.name.trim().to_string(),
-                    anrede: Some(Anrede::Firma), // TODO - ???
-                    vorname: String::new(),
-                    titel: String::new(),
-                    geburtsname: String::new(),
-                    wohnort: String::new(),
+                    
+                    anrede: nb.extra.anrede.clone(),
+                    titel: nb.extra.titel.clone().unwrap_or_default(),
+                    vorname: nb.extra.vorname.clone().unwrap_or_default(),
+                    nachname_oder_firma: nb.extra.nachname_oder_firma.unwrap_or(nb.name.trim().to_string()),
+                    geburtsname: nb.extra.geburtsname.clone().unwrap_or_default(),
+                    geburtsdatum: nb.extra.geburtsdatum.clone(),
+                    wohnort: nb.extra.wohnort.clone().unwrap_or_default(),
+
                     buchungsblatt_uuid: generiere_neue_uuid(),
                     bb_land: lan16.to_string(),
                     bb_bezirk: bbb.to_string(),
-                    bbn_mit_erweiterung: format!("v00001"), // TODO - ???
+                    bbn_mit_erweiterung: format!("v00001"),
                     buchungsblatt_bodenordnung_uuid: generiere_neue_uuid(),
                     ax_namensnummer_uuid: generiere_neue_uuid(),
                     lx_namensnummer_uuid: generiere_neue_uuid(),

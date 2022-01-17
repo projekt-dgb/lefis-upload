@@ -672,11 +672,15 @@ pub enum FfaDelete {
 #[derive(Debug, Clone, PartialEq)]
 pub enum FfaReplace {
 	Abteilung2 { 
+		grundbuch_name: String,
+		lfd_nr: usize,
 		uuid: String, 
 		erstellt_am: DateTime<Utc>,
 		insert: FfaLxAbteilung2,
 	},
 	Abteilung3 { 
+		grundbuch_name: String,
+		lfd_nr: usize,
 		uuid: String,
 		erstellt_am: DateTime<Utc>,
 		insert: FfaLxAbteilung3,
@@ -692,6 +696,8 @@ pub enum FfaReplace {
 		insert: FfaLxBuchungsstelleBelastetAbt3,
 	},
 	NebenbeteiligterReplace {
+		nebenbeteiligter_stammnr: usize,
+
 		lx_person_rolle_erstellt_am: DateTime<Utc>,
 		lx_person_rolle: FfaLxPersonRolle,
 
@@ -1083,6 +1089,7 @@ pub struct FfaAxPerson {
 	pub vorname: String,
 	pub titel: String,
 	pub geburtsname: String,
+	pub geburtsdatum: Option<DateTime<Utc>>,
 	pub wohnort: String,
 }
 
@@ -1096,6 +1103,7 @@ impl FfaAxPerson {
 			vorname,
 			titel,
 			geburtsname,
+			geburtsdatum,
 			wohnort,
 		} = self;
 
@@ -1182,6 +1190,7 @@ pub struct FfaLxOrdnungsNummer {
 	pub vorname: String,
 	pub titel: String,
 	pub geburtsname: String,
+	pub geburtsdatum: Option<DateTime<Utc>>,
 	pub wohnort: String,
 	pub buchungsblatt_uuid: String,
 	pub bb_land: String,
@@ -1192,9 +1201,8 @@ pub struct FfaLxOrdnungsNummer {
 	pub lx_namensnummer_uuid: String,
 }
 
-#[derive(Debug, Copy, Clone, PartialEq, Serialize, Deserialize)]
+#[derive(Debug, Copy, Clone, PartialEq, Eq, Ord, PartialOrd, Serialize, Deserialize)]
 pub enum Anrede {
-	// 1000
 	Herr,
 	Frau,
 	Firma,
@@ -1238,6 +1246,7 @@ impl FfaLxOrdnungsNummer {
 			vorname,
 			titel,
 			geburtsname,
+			geburtsdatum,
 			wohnort,
 			buchungsblatt_uuid,
 			bb_land,
@@ -1312,6 +1321,7 @@ impl FfaLxOrdnungsNummer {
 			anrede: anrede.clone(),
 			vorname: vorname.clone(),
 			titel: titel.clone(),
+			geburtsdatum: geburtsdatum.clone(),
 			geburtsname: geburtsname.clone(),
 			wohnort: wohnort.clone(),
 		}.get_xml();
@@ -1508,28 +1518,36 @@ impl FortfuehrungsAuftrag {
 
 		let replace = self.replace.iter().map(|i| {
 			match i {
-				FfaReplace::Abteilung2 { uuid, erstellt_am, insert } => {
+				FfaReplace::Abteilung2 { grundbuch_name, lfd_nr, uuid, erstellt_am, insert } => {
 					format!("
 					<wfsext:Replace vendorId=\"AdV\" safeToIgnore=\"false\">
+						<!-- Ändere {grundbuch_name} Abt. 2 lfd. Nr. {lfd_nr} -->
 						{insert}
 						<ogc:Filter>
 						  	<ogc:FeatureId fid=\"{uuid}{erstellt_am}\" />
 						</ogc:Filter>
 					</wfsext:Replace>
-					", insert = insert.get_xml(),
+					", 
+						grundbuch_name = grundbuch_name,
+						lfd_nr = lfd_nr,
+						insert = insert.get_xml(),
 						uuid = uuid,
 						erstellt_am = erstellt_am.format("%Y%m%dT%H%M%SZ"),
 					)
 				},
-				FfaReplace::Abteilung3 { uuid, erstellt_am, insert } => {
+				FfaReplace::Abteilung3 {  grundbuch_name, lfd_nr, uuid, erstellt_am, insert } => {
 					format!("
 					<wfsext:Replace vendorId=\"AdV\" safeToIgnore=\"false\">
+						<!-- Ändere {grundbuch_name} Abt. 3 lfd. Nr. {lfd_nr} -->
 						{insert}
 						<ogc:Filter>
 						  	<ogc:FeatureId fid=\"{uuid}{erstellt_am}\" />
 						</ogc:Filter>
 					</wfsext:Replace>
-					", insert = insert.get_xml(),
+					", 	
+						grundbuch_name = grundbuch_name,
+						lfd_nr = lfd_nr,
+						insert = insert.get_xml(),
 						uuid = uuid,
 						erstellt_am = erstellt_am.format("%Y%m%dT%H%M%SZ"),
 					)
@@ -1561,6 +1579,7 @@ impl FortfuehrungsAuftrag {
 					)
 				},
 				FfaReplace::NebenbeteiligterReplace {
+					nebenbeteiligter_stammnr,
 					lx_person_rolle_erstellt_am,
 					lx_person_rolle,
 					lx_person_erstellt_am,
@@ -1570,6 +1589,7 @@ impl FortfuehrungsAuftrag {
 				} => {
 					format!("
 					<wfsext:Replace vendorId=\"AdV\" safeToIgnore=\"false\">
+						<!-- Ordnungsnummer {nebenbeteiligter_stammnr}/00 -->
 						{lx_person_rolle_xml}
 						<ogc:Filter>
 						  	<ogc:FeatureId fid=\"{lx_person_rolle_uuid}{lx_person_rolle_erstellt_am}\" />
@@ -1590,6 +1610,7 @@ impl FortfuehrungsAuftrag {
 						</ogc:Filter>
 					</wfsext:Replace>
 					",
+						nebenbeteiligter_stammnr = nebenbeteiligter_stammnr,
 						lx_person_rolle_xml = lx_person_rolle.get_xml(),
 						lx_person_rolle_uuid = lx_person_rolle.personenrolle_uuid,
 						lx_person_rolle_erstellt_am = lx_person_rolle_erstellt_am.format("%Y%m%dT%H%M%SZ"),

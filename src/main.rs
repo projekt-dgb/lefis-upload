@@ -178,8 +178,8 @@ pub struct VerfahrenGeladen {
 
 #[derive(Debug, Copy, Clone, PartialEq, Serialize, Deserialize)]
 pub enum LxPersonRolleArt {
-    Grundbucheigentuemer,
     Katastereigentuemer,
+    Grundbucheigentuemer,
     LegitimierterEigentuemer,
     Nebenbeteiligter,
     LegitimierterNebenbeteiligter,
@@ -190,8 +190,8 @@ impl LxPersonRolleArt {
     pub fn from_usize(u: usize) -> Option<Self> {
         use self::LxPersonRolleArt::*;
         match u {
-            1001 => Some(Grundbucheigentuemer),
             1000 => Some(Katastereigentuemer),
+            1001 => Some(Grundbucheigentuemer),
             1002 => Some(LegitimierterEigentuemer),
             1003 => Some(Nebenbeteiligter),
             1004 => Some(LegitimierterNebenbeteiligter),
@@ -399,6 +399,8 @@ pub enum Auftragsstatus {
 pub struct LxAbteilung2 {
     pub uuid: String,
     pub erstellt_am: DateTime<Utc>,
+    // Recht gelöscht: ENDE != NULL
+    pub ende: Option<DateTime<Utc>>,
     pub lfd_nr: usize,
     pub buchungsstellen: Vec<AxBuchungsstelle>,
 }
@@ -408,6 +410,8 @@ pub struct LxAbteilung2 {
 pub struct LxAbteilung3 {
     pub uuid: String,
     pub erstellt_am: DateTime<Utc>,
+    // Recht gelöscht: ENDE != NULL
+    pub ende: Option<DateTime<Utc>>,
     pub lfd_nr: usize,
     pub buchungsstellen: Vec<AxBuchungsstelle>,
 }
@@ -437,8 +441,6 @@ pub struct AxBuchungsblatt {
     pub bbn: usize,
     // blatttyp. 1000 = Grundbuchblatt
     pub blt: usize,
-    // buchungsstellen für dieses Grundbuchblatt
-    pub ax_buchungsstellen: Vec<AxBestehendeBuchungsstelle>,
 }
 
 #[derive(Debug, Clone, PartialEq, Eq, Ord, PartialOrd, Serialize, Deserialize)]
@@ -858,8 +860,23 @@ pub struct Nebenbeteiligter {
     pub ordnungsnummer: Option<usize>,
     // Typ des NB, wichtig für ONr.
     pub typ: Option<NebenbeteiligterTyp>,
-    // Name des NB
+    // Name des NB im Grundbuch
     pub name: String,
+    // Informationen für das Anlegen der Ordnungsnummer 
+    // (wird 1:1 in LEFIS übernommen)
+    #[serde(default)]
+    pub extra: NebenbeteiligterExtra,
+}
+
+#[derive(Default, Debug, Clone, PartialEq, Eq, Ord, PartialOrd, Serialize, Deserialize)]
+pub struct NebenbeteiligterExtra {
+    pub anrede: Option<Anrede>,
+    pub titel: Option<String>,
+    pub vorname: Option<String>,
+    pub nachname_oder_firma: Option<String>,
+    pub geburtsname: Option<String>,
+    pub geburtsdatum: Option<DateTime<Utc>>,
+    pub wohnort: Option<String>,
 }
 
 #[derive(Debug, Clone, PartialEq, Eq, Ord, PartialOrd, Serialize, Deserialize)]
@@ -870,6 +887,8 @@ pub enum NebenbeteiligterTyp {
     Bank,
     #[serde(rename="AGRAR")]
     AgrarGenossenschaft,
+    #[serde(rename="PRIVAT")]
+    PrivateigentuemerMehrere,
     #[serde(rename="PRIVAT-M")]
     PrivateigentuemerHerr,
     #[serde(rename="PRIVAT-F")]
@@ -1280,21 +1299,17 @@ impl DhkVerbindung {
             })?;
 
             let mut mapping_ax21008_ax21007 = BTreeMap::new();
-            let mut mapping_ax21007_ax21008 = BTreeMap::new();
             match stmt.query_as::<(String, String)>(&[]) {
                 Ok(o) => {
                     for (ax21008, ax21007) in o.into_iter().filter_map(|o| o.ok()) {
                         mapping_ax21008_ax21007.insert(ax21008.clone(), ax21007.clone());
-                        mapping_ax21007_ax21008.entry(ax21007).or_insert_with(|| Vec::new()).push(AxBestehendeBuchungsstelle {
-                            kan: KennzeichnungAlterNeuerBestand::NeuerBestand,
-                            uuid: ax21008,
-                        });
                     }
                 },
                 Err(e) => {
                     println!("{}", e);
                 }
             }
+
 
             // mapping: LxBuchungsstelleBelastet zu LxBuchungsstelleBodenordnung
             let query_buchungsstelle_belastet_zu_buchungsstelle_bodenordnung = format!("
@@ -1401,16 +1416,6 @@ impl DhkVerbindung {
                         None => { return Err(oracle::Error::InternalError(format!("Ungültige KAN für AX_BuchungsblattBodenordnung: {}", kan))); },
                     };
 
-                    let ax_buchungsstellen = match mapping_ax21007_ax21008.get_mut(&ax_buchungsblatt_uuid) {
-                        Some(s) => {
-                            for s_mut in s.iter_mut() {
-                                s_mut.kan = kan;
-                            }
-                            s.clone()
-                        },
-                        None => Vec::new(),
-                    };
-
                     let bbb_name = ax_buchungsblattbezirke_map
                     .get(&(lan16, bbb))
                     .cloned();
@@ -1426,7 +1431,6 @@ impl DhkVerbindung {
                             bbb_name,
                             bbn,
                             blt,
-                            ax_buchungsstellen,
                         }
                     }))
                 })
@@ -1468,7 +1472,7 @@ impl DhkVerbindung {
 
             // alle Abt 2. Rechte
             let query_abt2 = format!("                
-                SELECT a.UUID, a.BEG, a.LFD, a.LX91003, c.UUID, c.BEG
+                SELECT a.UUID, a.BEG, a.ENDE, a.LFD, a.LX91003, c.UUID, c.BEG
                 FROM {schema}.LX23001 a
                 INNER JOIN {schema}.A_LX23001_LX23004  b ON a.UUID = b.OFID
                 INNER JOIN {schema}.LX23004 c ON b.DFID = c.UUID
@@ -1481,7 +1485,7 @@ impl DhkVerbindung {
 
             let mut abteilung2_rechte_in_schema_map = BTreeMap::new();
 
-            if let Ok(rr) = stmt.query_as::<(String, DateTime<Utc>, usize, String, String, DateTime<Utc>)>(&[]) {
+            if let Ok(rr) = stmt.query_as::<(String, DateTime<Utc>, Option<DateTime<Utc>>, usize, String, String, DateTime<Utc>)>(&[]) {
 
                 let abteilung2_rechte_in_schema = rr
                 .into_iter()
@@ -1491,6 +1495,7 @@ impl DhkVerbindung {
                     let (
                         uuid, 
                         erstellt_am,
+                        ende,
                         lfd_nr, 
                         verfahren_uuid,
                         buchungsstelle_belastet_uuid,
@@ -1503,7 +1508,7 @@ impl DhkVerbindung {
                         None => { return Err(oracle::Error::InternalError(format!("Für Recht {} konnte keine Buchungssstelle ermittelt werden", uuid))); },
                     };
 
-                    // AX_21008
+                    // AX_21008 = Buchungssstelle
                     let mut buchungsstellen = Vec::new();
                     for lx21008 in buchungsstelle_bodenordnung_uuids.iter() {
 
@@ -1515,6 +1520,7 @@ impl DhkVerbindung {
                             },
                         };
 
+                        // AX21007 = Buchungsblatt
                         let ax21007 = match mapping_ax21008_ax21007.get(&ax21008) {
                             Some(s) => s.clone(),
                             None => { 
@@ -1536,6 +1542,7 @@ impl DhkVerbindung {
                     Ok((verfahren_uuid.clone(), LxAbteilung2 {
                         uuid,
                         erstellt_am,
+                        ende,
                         lfd_nr,
                         buchungsstellen,
                     }))
@@ -1556,7 +1563,7 @@ impl DhkVerbindung {
             // alle Abt 3. Rechte
             // lfd. Nr., textlicher Teil, RechteArt (Schuld), Aktionsstatus, Rangvermerk, eingetragen am, Verfahrens-UUID
             let query_abt3 = format!("
-                SELECT a.UUID, a.BEG, a.LFD, a.LX91003, c.UUID, c.BEG
+                SELECT a.UUID, a.BEG, a.ENDE, a.LFD, a.LX91003, c.UUID, c.BEG
                 FROM {schema}.LX23002 a
                 INNER JOIN {schema}.A_LX23002_LX23004  b ON a.UUID = b.OFID
                 INNER JOIN {schema}.LX23004 c ON b.DFID = c.UUID
@@ -1568,7 +1575,7 @@ impl DhkVerbindung {
             })?;
 
             let mut abteilung3_rechte_in_schema_map = BTreeMap::<String, Vec<LxAbteilung3>>::new();
-            if let Ok(rr) = stmt.query_as::<(String, DateTime<Utc>, usize, String, String, DateTime<Utc>)>(&[]) {
+            if let Ok(rr) = stmt.query_as::<(String, DateTime<Utc>, Option<DateTime<Utc>>, usize, String, String, DateTime<Utc>)>(&[]) {
 
                 let abteilung3_rechte_in_schema = rr
                 .into_iter()
@@ -1578,6 +1585,7 @@ impl DhkVerbindung {
                     let (
                         uuid,
                         erstellt_am,
+                        ende,
                         lfd_nr,
                         verfahren_uuid,
                         buchungsstelle_belastet_uuid,
@@ -1622,6 +1630,7 @@ impl DhkVerbindung {
 
                     Ok((verfahren_uuid.clone(), LxAbteilung3 {
                         uuid,
+                        ende,
                         erstellt_am,
                         lfd_nr,
                         buchungsstellen,
