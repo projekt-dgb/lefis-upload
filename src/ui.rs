@@ -1996,12 +1996,12 @@ fn generiere_ffa(
                         beginnt_datum: jetzt.clone(),
                         
                         anrede: nb.extra.anrede.clone(),
-                        titel: nb.extra.titel.clone().unwrap_or_default(),
-                        vorname: nb.extra.vorname.clone().unwrap_or_default(),
+                        titel: nb.extra.titel.clone(),
+                        vorname: nb.extra.vorname.clone(),
                         nachname_oder_firma: nb.extra.nachname_oder_firma.unwrap_or(nb.name.trim().to_string()),
-                        geburtsname: nb.extra.geburtsname.clone().unwrap_or_default(),
+                        geburtsname: nb.extra.geburtsname.clone(),
                         geburtsdatum: nb.extra.geburtsdatum.clone(),
-                        wohnort: nb.extra.wohnort.clone().unwrap_or_default(),
+                        wohnort: nb.extra.wohnort.clone(),
                     },
                 });
             },
@@ -2022,12 +2022,12 @@ fn generiere_ffa(
                     ax_person_uuid: generiere_neue_uuid(),
                     
                     anrede: nb.extra.anrede.clone(),
-                    titel: nb.extra.titel.clone().unwrap_or_default(),
-                    vorname: nb.extra.vorname.clone().unwrap_or_default(),
+                    titel: nb.extra.titel.clone(),
+                    vorname: nb.extra.vorname.clone(),
                     nachname_oder_firma: nb.extra.nachname_oder_firma.unwrap_or(nb.name.trim().to_string()),
-                    geburtsname: nb.extra.geburtsname.clone().unwrap_or_default(),
+                    geburtsname: nb.extra.geburtsname.clone(),
                     geburtsdatum: nb.extra.geburtsdatum.clone(),
-                    wohnort: nb.extra.wohnort.clone().unwrap_or_default(),
+                    wohnort: nb.extra.wohnort.clone(),
 
                     buchungsblatt_uuid: generiere_neue_uuid(),
                     bb_land: lan16.to_string(),

@@ -1086,11 +1086,11 @@ pub struct FfaAxPerson {
 	pub beginnt_datum: DateTime<Utc>,
 	pub nachname_oder_firma: String,
 	pub anrede: Option<Anrede>,
-	pub vorname: String,
-	pub titel: String,
-	pub geburtsname: String,
+	pub vorname: Option<String>,
+	pub titel: Option<String>,
+	pub geburtsname: Option<String>,
 	pub geburtsdatum: Option<DateTime<Utc>>,
-	pub wohnort: String,
+	pub wohnort: Option<String>,
 }
 
 impl FfaAxPerson {
@@ -1127,10 +1127,11 @@ impl FfaAxPerson {
 			  </modellart>
 			  <nachnameOderFirma>{nachname_oder_firma}</nachnameOderFirma>
 			  {anrede}
-			  <vorname>{vorname}</vorname>
-			  <namensbestandteil>{titel}</namensbestandteil>
-			  <geburtsname>{geburtsname}</geburtsname>
-			  <wohnortOderSitz>{wohnort}</wohnortOderSitz>
+			  {vorname}
+			  {titel}
+			  {geburtsname}
+			  {geburtsdatum}
+			  {wohnort}
 			  <qualitaetsangaben>
 			    <AX_DQOhneDatenerhebung>
 			      <herkunft>
@@ -1165,11 +1166,12 @@ impl FfaAxPerson {
 			ax_person_uuid = ax_person_uuid,
 			beginnt_datum = beginnt_datum.to_rfc3339_opts(SecondsFormat::Secs, true),
 			nachname_oder_firma = xml_clean_text(nachname_oder_firma),
-			anrede = anrede.map(|s| format!("<anrede>{}</anrede>", s.code())).unwrap_or_default(),
-			vorname = xml_clean_text(vorname),
-			titel = xml_clean_text(titel),
-			geburtsname = xml_clean_text(geburtsname),
-			wohnort = xml_clean_text(wohnort),
+			anrede = anrede.as_ref().map(|s| format!("<anrede>{}</anrede>", s.code())).unwrap_or_default(),
+			vorname = vorname.as_ref().map(|v| format!("<vorname>{}</vorname>", xml_clean_text(v))).unwrap_or_default(),
+			titel = titel.as_ref().map(|t| format!("<namensbestandteil>{}</namensbestandteil>", xml_clean_text(t))).unwrap_or_default(),
+			geburtsname = geburtsname.as_ref().map(|g| format!("<geburtsname>{}</geburtsname>",xml_clean_text(g))).unwrap_or_default(),
+			geburtsdatum = geburtsdatum.as_ref().map(|g| format!("<geburtsdatum>{}</geburtsdatum>", g.format("%Y-%m-%d").to_string())).unwrap_or_default(),
+			wohnort = wohnort.as_ref().map(|w| format!("<wohnortOderSitz>{}</wohnortOderSitz>", xml_clean_text(w))).unwrap_or_default(),
 		)
 	}
 }
@@ -1187,11 +1189,11 @@ pub struct FfaLxOrdnungsNummer {
 	pub ax_person_uuid: String,
 	pub nachname_oder_firma: String,
 	pub anrede: Option<Anrede>,
-	pub vorname: String,
-	pub titel: String,
-	pub geburtsname: String,
+	pub vorname: Option<String>,
+	pub titel: Option<String>,
+	pub geburtsname: Option<String>,
 	pub geburtsdatum: Option<DateTime<Utc>>,
-	pub wohnort: String,
+	pub wohnort: Option<String>,
 	pub buchungsblatt_uuid: String,
 	pub bb_land: String,
 	pub bb_bezirk: String,
