@@ -648,16 +648,18 @@ fn render_verfahren_info(app_data: RefAny, data: &AppData) -> Dom {
                 format!("Blatt"),
                 format!("Nr."),
             ].into())
-            .with_rows(ausgewaehltes_verfahren.buchungsblatt_bodenordnung.iter().take(20).map(|gb| {
-                ListViewRow {
+            .with_rows(ausgewaehltes_verfahren.buchungsblatt_bodenordnung
+                .iter()
+                .filter(|gb| !gb.nebenbeteiligten_blatt)
+                .take(20)
+                .map(|gb| ListViewRow {
                     cells: vec![
                         CheckBox::new(gb.grundbuchvergleich_durchgefuehrt).dom(),
                         p::render(gb.ax_buchungsblatt.bbb_name.clone().unwrap_or_default().into()),
                         p::render(format!("{}", gb.ax_buchungsblatt.bbn).into()),
                     ].into(),
                     height: None.into(),
-                }
-            }).collect::<Vec<_>>().into())
+                }).collect::<Vec<_>>().into())
             .dom(),
             1 => ListView::new(vec![
                 format!("Gemarkung"),
@@ -1134,6 +1136,92 @@ fn lefis_datei_fortfuehren(data: &mut RefAny, info: &mut CallbackInfo) -> Update
     aktives_verfahren.lefis_geladen = None;
 
     Update::DoNothing
+}
+
+#[derive(Debug)]
+struct XmlBackgroundThreadInit {
+    konfiguration: LefisUploadKonfiguration,
+    verfahren_uuid: String,
+    xml: String,
+}
+
+extern "C" fn xml_ffa_background_thread(
+    mut initial_data: RefAny,
+    mut sender: ThreadSender,
+    _recv: ThreadReceiver,
+) {
+    use crate::wsdl::{
+        AuftragsManager, 
+        RequestFailure,
+        ProtokollMsg,
+    };
+    use azul::task::*;
+    use azul::callbacks::WriteBackCallback;
+
+    let initial_data = match initial_data.downcast_ref::<XmlBackgroundThreadInit>() {
+        Some(s) => s,
+        None => return, // error
+    };
+    let initial_data = &*initial_data;
+
+    let konfiguration = &initial_data.konfiguration.lefis;
+    let verfahren_uuid = initial_data.verfahren_uuid.clone();
+
+    let am = AuftragsManager::new(
+        &konfiguration.get_webservice_url(), 
+        konfiguration.benutzer.clone(), 
+        konfiguration.passwort.clone()
+    );
+    
+    sender.send(ThreadReceiveMsg::WriteBack(ThreadWriteBackMsg {
+        data: RefAny::new(BackgroundThreadReturn::FortschrittUpdate { 
+            verfahrens_uuid: verfahren_uuid.clone(), 
+            prozent: 0,
+        }),
+        callback: WriteBackCallback { cb: writeback_callback }
+    }));
+
+    let mut protokoll_ext = None;
+    let e: Result<(), RequestFailure> = exec_sync(async {
+        let login = am.login().await?;
+        let auftragsnummer = match am.register_gzip(login.session_id, &initial_data.xml).await {
+            Ok(o) => Ok(o.auftragsnummer),
+            Err(e) => {
+                am.logout(login.session_id).await?;
+                Err(e)
+            }
+        }?;
+
+        let result = warte_auf_auftrag_fortfuehrung(&am, login.session_id, &auftragsnummer).await;
+
+        if let Err(e) = &result {
+            let protocol = am.get_protocol_gzip(login.session_id, &auftragsnummer).await?;
+            protokoll_ext = Some(protocol.protokoll_msg);
+        }
+
+        am.logout(login.session_id).await?;
+
+        result
+    });
+
+    let data = match e {
+        Err(e) => {
+            BackgroundThreadReturn::Fehler { 
+                verfahrens_uuid: verfahren_uuid.clone(),
+                log: protokoll_ext.unwrap_or_default(),
+            }
+        },
+        Ok(_) => {
+            BackgroundThreadReturn::Fortgefuehrt { 
+                verfahrens_uuid: verfahren_uuid.clone(), 
+            }  
+        }
+    };
+
+    sender.send(ThreadReceiveMsg::WriteBack(ThreadWriteBackMsg {
+        data: RefAny::new(data),
+        callback: WriteBackCallback { cb: writeback_callback }
+    }));
 }
 
 #[derive(Debug)]
@@ -2496,11 +2584,45 @@ pub fn render(app_data: RefAny, data: &AppData) -> Dom {
                     .with_callback(app_data.clone(), lefis_ffa_exportieren);
                     
                     if v.lefis_geladen.is_none() {
-                        menu_item.state = MenuItemState::Greyed;
+                        menu_item.state = MenuItemState::Disabled;
                     }
                     
                     menu_item
-                })
+                }),
+                MenuItem::Separator,
+                MenuItem::String(StringMenuItem::new("Werkzeuge".into())
+                .with_children(vec![
+                    MenuItem::String(
+                        StringMenuItem::new("Grundbuchvergleich".into())
+                        .with_children(vec![
+                            MenuItem::String(
+                                StringMenuItem::new("Alle -> nicht durchgeführt".into())
+                                .with_callback(app_data.clone(), gbve_alle_haken_loeschen)
+                            ),
+                            MenuItem::String(
+                                StringMenuItem::new("Alle -> durchgeführt".into())
+                                .with_callback(app_data.clone(), gbve_alle_haken_setzen)
+                            ),
+                        ].into())
+                    ),
+                    MenuItem::String(
+                        StringMenuItem::new("Anteile".into())
+                        .with_children(vec![
+                            MenuItem::String(StringMenuItem::new("Alle -> 1/1".into()))
+                        ].into())
+                    ),
+                    MenuItem::String(
+                        StringMenuItem::new("Adressen".into())
+                        .with_children(vec![
+                            MenuItem::String(StringMenuItem::new("Feld \"Land\" bereinigen".into()))
+                        ].into())
+                    ),
+                    MenuItem::String(
+                        StringMenuItem::new("Fortführungsauftrag aus Datei ausführen...".into())
+                        .with_callback(app_data.clone(), ffa_aus_datei_ausfuehren)
+                    ),
+                ].into()))
+
             ].into())))
         }
 
@@ -2519,6 +2641,208 @@ pub fn render(app_data: RefAny, data: &AppData) -> Dom {
             None => div::render()
         }    
     ]))
+}
+
+extern "C"
+fn ffa_aus_datei_ausfuehren(app_data: &mut RefAny, info: &mut CallbackInfo) -> Update {
+    
+    use azul::dialog::{MsgBox, FileDialog};
+
+    let data_clone = app_data.clone();
+    let data = match app_data.downcast_ref::<AppData>() {
+        Some(s) => s,
+        None => return Update::DoNothing,
+    };
+    
+    let data = &*data;
+
+    let verfahren = match data.ausgewaehltes_verfahren
+        .as_ref()
+        .and_then(|s| data.geladene_verfahren.verfahren.iter().find(|v| v.uuid.as_str() == s.as_str())) {
+        Some(s) => s,
+        None => { return Update::DoNothing; },
+    };
+    
+    let dateipfad = match FileDialog::select_file("Fortführungsauftrag laden".into(), None.into(), None.into()).into_option() {
+        Some(s) => s,
+        None => return Update::DoNothing,    
+    };
+    let mut dateipfad = dateipfad.as_str().to_string();
+
+    let datei = match std::fs::read_to_string(&dateipfad) {
+        Ok(o) => o,
+        Err(e) => {
+            MsgBox::error(format!("Fehler beim Laden der Datei: {}", e).into());
+            return Update::DoNothing;
+        }
+    };
+
+    let init_data = RefAny::new(XmlBackgroundThreadInit {
+        konfiguration: data.konfiguration.clone(),
+        verfahren_uuid: verfahren.uuid.clone(),
+        xml: get_verfahren_grundbuchhaken(&verfahren, false),
+    });
+
+    let _ = match info.start_thread(init_data, data_clone, xml_ffa_background_thread).into_option() {
+        Some(s) => s,
+        None => return Update::DoNothing, // thread creation failed
+    };
+
+    Update::RefreshDom
+}
+
+extern "C"
+fn gbve_alle_haken_loeschen(app_data: &mut RefAny, info: &mut CallbackInfo) -> Update {
+    
+    let data_clone = app_data.clone();
+    let data = match app_data.downcast_ref::<AppData>() {
+        Some(s) => s,
+        None => return Update::DoNothing,
+    };
+    
+    let data = &*data;
+    
+    let verfahren = match data.ausgewaehltes_verfahren
+        .as_ref()
+        .and_then(|s| data.geladene_verfahren.verfahren.iter().find(|v| v.uuid.as_str() == s.as_str())) {
+        Some(s) => s,
+        None => { return Update::DoNothing; },
+    };
+
+    let init_data = RefAny::new(XmlBackgroundThreadInit {
+        konfiguration: data.konfiguration.clone(),
+        verfahren_uuid: verfahren.uuid.clone(),
+        xml: get_verfahren_grundbuchhaken(&verfahren, false),
+    });
+
+    let _ = match info.start_thread(init_data, data_clone, xml_ffa_background_thread).into_option() {
+        Some(s) => s,
+        None => return Update::DoNothing, // thread creation failed
+    };
+
+    Update::RefreshDom
+}
+
+fn get_verfahren_grundbuchhaken(verfahren: &VerfahrenGeladen, haken_setzen: bool) -> String {
+    
+    use crate::wsdl::KennzeichnungAlterNeuerBestand;
+    use chrono::SecondsFormat;
+
+    let mut xml = String::new();
+
+    for buchungsblatt in verfahren.buchungsblatt_bodenordnung.iter()
+        .filter(|gb| !gb.nebenbeteiligten_blatt)
+        .filter(|gb| gb.kan == KennzeichnungAlterNeuerBestand::AlterBestand) {
+
+        xml.push_str(&format!("
+            <wfsext:Replace vendorId=\"AdV\" safeToIgnore=\"false\">
+              <lefis:LX_BuchungsblattBodenordnung gml:id=\"{uuid}\">
+                <gml:identifier codeSpace=\"http://www.adv-online.de/\">urn:adv:oid:{uuid}</gml:identifier>
+                <lebenszeitintervall>
+                  <AA_Lebenszeitintervall>
+                    <beginnt>{beginnt_datum}</beginnt>
+                  </AA_Lebenszeitintervall>
+                </lebenszeitintervall>
+                <modellart>
+                  <AA_Modellart>
+                    <sonstigesModell>LEFIS</sonstigesModell>
+                  </AA_Modellart>
+                </modellart>
+                <lefis:kan>A</lefis:kan>
+                <lefis:gehoertZuVerfahren xlink:href=\"urn:adv:oid:{verfahren_uuid}\" />
+                <lefis:unterliegtDemNachtrag>false</lefis:unterliegtDemNachtrag>
+                <lefis:unterliegtEinerPlantextziffer>true</lefis:unterliegtEinerPlantextziffer>
+                <lefis:kopierVorgangErfolgt>false</lefis:kopierVorgangErfolgt>
+                <lefis:ergaenzt xlink:href=\"urn:adv:oid:{ax_buchungsblatt_uuid}\" />
+                <lefis:nebenbeteiligtenBlatt>false</lefis:nebenbeteiligtenBlatt>
+                <lefis:grundbuchvergleichDurchgefuehrt>{haken_setzen}</lefis:grundbuchvergleichDurchgefuehrt>
+                <lefis:vollmigriertesGrundbuchblatt>false</lefis:vollmigriertesGrundbuchblatt>
+              </lefis:LX_BuchungsblattBodenordnung>
+              <ogc:Filter>
+                <ogc:FeatureId fid=\"{uuid}{feature_beg}\" />
+              </ogc:Filter>
+            </wfsext:Replace>
+        ",
+            uuid = buchungsblatt.uuid,
+            feature_beg = buchungsblatt.beg.format("%Y%m%dT%H%M%SZ"),
+            beginnt_datum = buchungsblatt.beg.to_rfc3339_opts(SecondsFormat::Secs, true),
+            verfahren_uuid = verfahren.uuid,
+            ax_buchungsblatt_uuid = buchungsblatt.ax_buchungsblatt.uuid,
+            haken_setzen = if haken_setzen { "true" } else { "false" },
+        ));
+    }
+
+    let ffa_xml = format!("
+        <?xml version=\"1.0\" encoding=\"utf-8\"?>
+        <!--Die NAS-Datei wurde mit der FI-Version 6.4.3.19200 erstellt.-->
+        <AX_Fortfuehrungsauftrag xsi:schemaLocation=\"http://www.landentwicklung.de/namespaces/lefis/1.5 NAS-LEFIS-Operationen.xsd http://www.adv-online.de/namespaces/adv/gid/6.0 aaa.xsd\" xmlns=\"http://www.adv-online.de/namespaces/adv/gid/6.0\" xmlns:gsr=\"http://www.isotc211.org/2005/gsr\" xmlns:fc=\"http://www.adv-online.de/namespaces/adv/gid/fc/6.0\" xmlns:xsi=\"http://www.w3.org/2001/XMLSchema-instance\" xmlns:gml=\"http://www.opengis.net/gml/3.2\" xmlns:xlink=\"http://www.w3.org/1999/xlink\" xmlns:lefis=\"http://www.landentwicklung.de/namespaces/lefis/1.5\" xmlns:wfsext=\"http://www.adv-online.de/namespaces/adv/gid/wfsext\" xmlns:gco=\"http://www.isotc211.org/2005/gco\" xmlns:xs=\"http://www.w3.org/2001/XMLSchema\" xmlns:gts=\"http://www.isotc211.org/2005/gts\" xmlns:ogc=\"http://www.adv-online.de/namespaces/adv/gid/ogc\" xmlns:wfs=\"http://www.adv-online.de/namespaces/adv/gid/wfs\" xmlns:gmd=\"http://www.isotc211.org/2005/gmd\" xmlns:gss=\"http://www.isotc211.org/2005/gss\">
+              <empfaenger>
+                <AA_Empfaenger>
+                  <direkt>true</direkt>
+                </AA_Empfaenger>
+              </empfaenger>
+              <ausgabeform>application/gzip</ausgabeform>
+              <koordinatenangaben>
+                <AA_Koordinatenreferenzsystemangaben>
+                  <crs xlink:href=\"urn:adv:crs:ETRS89_UTM33\" />
+                  <anzahlDerNachkommastellen>3</anzahlDerNachkommastellen>
+                  <standard>true</standard>
+                </AA_Koordinatenreferenzsystemangaben>
+              </koordinatenangaben>
+              <geaenderteObjekte>
+                <wfs:Transaction version=\"1.0.0\" service=\"WFS\">
+                  {replace}
+                </wfs:Transaction>
+              </geaenderteObjekte>
+              <profilkennung>AED Sicad</profilkennung>
+              <antragsnummer>LefisUpload-{auftragsnummer}-{antragsnummer}</antragsnummer>
+              <auftragsnummer>{auftragsnummer}</auftragsnummer>
+              <impliziteLoeschungDerReservierung>4000</impliziteLoeschungDerReservierung>
+              <verarbeitungsart>1000</verarbeitungsart>
+              <geometriebehandlung>false</geometriebehandlung>
+              <mitTemporaeremArbeitsbereich>false</mitTemporaeremArbeitsbereich>
+              <mitObjektenImFortfuehrungsgebiet>false</mitObjektenImFortfuehrungsgebiet>
+              <mitFortfuehrungsnachweis>false</mitFortfuehrungsnachweis>
+          </AX_Fortfuehrungsauftrag>
+    ", 
+        replace = xml,
+        antragsnummer = verfahren.name, // Wilmersdorf-Weesow_...
+        auftragsnummer = format!("{}_0099", verfahren.nummer)
+    );
+
+    ffa_xml
+}
+
+extern "C"
+fn gbve_alle_haken_setzen(app_data: &mut RefAny, info: &mut CallbackInfo) -> Update {
+    
+    let data_clone = app_data.clone();
+    let data = match app_data.downcast_ref::<AppData>() {
+        Some(s) => s,
+        None => return Update::DoNothing,
+    };
+    
+    let data = &*data;
+    
+    let verfahren = match data.ausgewaehltes_verfahren
+        .as_ref()
+        .and_then(|s| data.geladene_verfahren.verfahren.iter().find(|v| v.uuid.as_str() == s.as_str())) {
+        Some(s) => s,
+        None => { return Update::DoNothing; },
+    };
+
+    let init_data = RefAny::new(XmlBackgroundThreadInit {
+        konfiguration: data.konfiguration.clone(),
+        verfahren_uuid: verfahren.uuid.clone(),
+        xml: get_verfahren_grundbuchhaken(&verfahren, true),
+    });
+
+    let _ = match info.start_thread(init_data, data_clone, xml_ffa_background_thread).into_option() {
+        Some(s) => s,
+        None => return Update::DoNothing, // thread creation failed
+    };
+
+    Update::RefreshDom
 }
 
 extern "C"

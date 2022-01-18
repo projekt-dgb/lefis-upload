@@ -419,6 +419,8 @@ pub struct LxAbteilung3 {
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
 pub struct LxBuchungsblattBodenordnung {
     pub uuid: String,
+    pub beg: DateTime<Utc>,
+    pub kan: KennzeichnungAlterNeuerBestand,
     // Ist dieses Blatt ein fiktives Blatt für NB?
     pub nebenbeteiligten_blatt: bool,
     // GBVE: Haken
@@ -1379,7 +1381,7 @@ impl DhkVerbindung {
 
             // alle LX_BuchungsblattBodenordnung laden mit Verfahrens-ID und joinen mit AX_Buchungsblatt
             let query_grundbuchblattbezirke = format!("
-                SELECT a.UUID, a.LX91003, a.KAN, a.NEBL, a.GBVE, a.AX21007, b.LAN16, b.BBB, b.BBN, b.BLT 
+                SELECT a.UUID, a.BEG, a.LX91003, a.KAN, a.NEBL, a.GBVE, a.AX21007, b.LAN16, b.BBB, b.BBN, b.BLT 
                 FROM {schema}.LX21007 a
                 INNER JOIN {schema}.AX21007 b ON a.AX21007 = b.UUID
             ");
@@ -1390,13 +1392,14 @@ impl DhkVerbindung {
             })?;
         
             let mut buchungsblatt_bodenordnung_map = BTreeMap::new();
-            if let Ok(rr) = stmt.query_as::<(String, String, usize, usize, usize, String, usize, usize, usize, usize)>(&[]) {
+            if let Ok(rr) = stmt.query_as::<(String, DateTime<Utc>, String, usize, usize, usize, String, usize, usize, usize, usize)>(&[]) {
 
                 let buchungsblatt_bodenordnung = rr
                 .into_iter()
                 .map(|abt2| {
                     let (
                         uuid, 
+                        beg,
                         verfahren_uuid,
                         kan,
                         nebenbeteiligten_blatt,
@@ -1413,7 +1416,7 @@ impl DhkVerbindung {
 
                     let kan = match KennzeichnungAlterNeuerBestand::from_usize(kan) {
                         Some(s) => s,
-                        None => { return Err(oracle::Error::InternalError(format!("Ungültige KAN für AX_BuchungsblattBodenordnung: {}", kan))); },
+                        None => { return Err(oracle::Error::InternalError(format!("Ungültige KAN für LX_BuchungsblattBodenordnung: {}", kan))); },
                     };
 
                     let bbb_name = ax_buchungsblattbezirke_map
@@ -1422,6 +1425,8 @@ impl DhkVerbindung {
 
                     Ok((verfahren_uuid.clone(), LxBuchungsblattBodenordnung {
                         uuid,
+                        kan,
+                        beg,
                         nebenbeteiligten_blatt,
                         grundbuchvergleich_durchgefuehrt,
                         ax_buchungsblatt: AxBuchungsblatt {
