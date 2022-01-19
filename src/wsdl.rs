@@ -775,7 +775,7 @@ impl FfaLxAbteilung2 {
 		} = self;
 
 		format!("
-		<lefis:LX_Abteilung2 gml:id=\"{neue_uuid}\"> <!-- {grundbuch_name} Abt. 2 Recht {lfd_nr} -->
+		<lefis:LX_Abteilung2 gml:id=\"{neue_uuid}\">
 		  <gml:identifier codeSpace=\"http://www.adv-online.de/\">urn:adv:oid:{neue_uuid}</gml:identifier>
 		  <lebenszeitintervall>
 		    <AA_Lebenszeitintervall>
@@ -801,7 +801,6 @@ impl FfaLxAbteilung2 {
 		  <lefis:rangvermerk>{rangvermerk}</lefis:rangvermerk>
 		</lefis:LX_Abteilung2>
 		",
-		grundbuch_name = grundbuch_name,
 	    neue_uuid = neue_uuid,
 	    beginnt_datum = beginnt_datum.to_rfc3339_opts(SecondsFormat::Secs, true),
 	    kan = kan.code(),
@@ -837,7 +836,7 @@ impl FfaLxAbteilung3 {
 		} = self;
 
 		format!("
-	        <lefis:LX_Abteilung3 gml:id=\"{neue_uuid}\"> <!-- {grundbuch_name} Abt. 3 Recht {lfd_nr} -->
+	        <lefis:LX_Abteilung3 gml:id=\"{neue_uuid}\">
 	          <gml:identifier codeSpace=\"http://www.adv-online.de/\">urn:adv:oid:{neue_uuid}</gml:identifier>
 	          <lebenszeitintervall>
 	            <AA_Lebenszeitintervall>
@@ -865,7 +864,6 @@ impl FfaLxAbteilung3 {
 	          <lefis:rechteArt>{schuldenart}</lefis:rechteArt>
 	        </lefis:LX_Abteilung3>
 			",
-			grundbuch_name = grundbuch_name,
 			neue_uuid = neue_uuid,
 			beginnt_datum = beginnt_datum.to_rfc3339_opts(SecondsFormat::Secs, true),
 			kan = kan.code(),
@@ -1482,7 +1480,7 @@ impl FortfuehrungsAuftrag {
 			match d {
 				FfaDelete::Abteilung2 { uuid, erstellt_am, grundbuch_name, lfd_nr } => {
 					format!("
-						<wfs:Delete typeName=\"LX_Abteilung2\"> <!-- {grundbuch_name} Abt. 2 Recht {lfd_nr} -->
+						<wfs:Delete typeName=\"LX_Abteilung2\">
 							<ogc:Filter>
 							  	<ogc:FeatureId fid=\"{uuid}{erstellt_am}\" />
 							</ogc:Filter>
@@ -1490,21 +1488,17 @@ impl FortfuehrungsAuftrag {
 					", 
 						uuid = uuid, 
 						erstellt_am = erstellt_am.format("%Y%m%dT%H%M%SZ"),
-						grundbuch_name = grundbuch_name,
-						lfd_nr = lfd_nr,
 					)
 				},
 				FfaDelete::Abteilung3 { uuid, erstellt_am, grundbuch_name, lfd_nr } => {
 				format!("
-					<wfs:Delete typeName=\"LX_Abteilung3\"> <!-- {grundbuch_name} Abt. 3 Recht {lfd_nr} -->
+					<wfs:Delete typeName=\"LX_Abteilung3\">
 						<ogc:Filter>
 							<ogc:FeatureId fid=\"{uuid}{erstellt_am}\" />
 						</ogc:Filter>
 					</wfs:Delete>", 
 					uuid = uuid, 
 					erstellt_am = erstellt_am.format("%Y%m%dT%H%M%SZ"), 
-					grundbuch_name = grundbuch_name, 
-					lfd_nr = lfd_nr, 
 					)
 				},
 				FfaDelete::BuchungsstelleBelastet { uuid, erstellt_am } => {
@@ -1513,7 +1507,10 @@ impl FortfuehrungsAuftrag {
 						<ogc:Filter>
 						  <ogc:FeatureId fid=\"{uuid}{erstellt_am}\" />
 						</ogc:Filter>
-					</wfs:Delete>", uuid = uuid, erstellt_am = erstellt_am.format("%Y%m%dT%H%M%SZ"))
+					</wfs:Delete>", 
+					uuid = uuid, 
+					erstellt_am = erstellt_am.format("%Y%m%dT%H%M%SZ")
+					)
 				}
 			}
 		}).collect::<Vec<_>>().join("\r\n");
@@ -1523,15 +1520,12 @@ impl FortfuehrungsAuftrag {
 				FfaReplace::Abteilung2 { grundbuch_name, lfd_nr, uuid, erstellt_am, insert } => {
 					format!("
 					<wfsext:Replace vendorId=\"AdV\" safeToIgnore=\"false\">
-						<!-- Ändere {grundbuch_name} Abt. 2 lfd. Nr. {lfd_nr} -->
 						{insert}
 						<ogc:Filter>
 						  	<ogc:FeatureId fid=\"{uuid}{erstellt_am}\" />
 						</ogc:Filter>
 					</wfsext:Replace>
 					", 
-						grundbuch_name = grundbuch_name,
-						lfd_nr = lfd_nr,
 						insert = insert.get_xml(),
 						uuid = uuid,
 						erstellt_am = erstellt_am.format("%Y%m%dT%H%M%SZ"),
@@ -1540,15 +1534,12 @@ impl FortfuehrungsAuftrag {
 				FfaReplace::Abteilung3 {  grundbuch_name, lfd_nr, uuid, erstellt_am, insert } => {
 					format!("
 					<wfsext:Replace vendorId=\"AdV\" safeToIgnore=\"false\">
-						<!-- Ändere {grundbuch_name} Abt. 3 lfd. Nr. {lfd_nr} -->
 						{insert}
 						<ogc:Filter>
 						  	<ogc:FeatureId fid=\"{uuid}{erstellt_am}\" />
 						</ogc:Filter>
 					</wfsext:Replace>
 					", 	
-						grundbuch_name = grundbuch_name,
-						lfd_nr = lfd_nr,
 						insert = insert.get_xml(),
 						uuid = uuid,
 						erstellt_am = erstellt_am.format("%Y%m%dT%H%M%SZ"),
@@ -1591,7 +1582,6 @@ impl FortfuehrungsAuftrag {
 				} => {
 					format!("
 					<wfsext:Replace vendorId=\"AdV\" safeToIgnore=\"false\">
-						<!-- Ordnungsnummer {nebenbeteiligter_stammnr}/00 -->
 						{lx_person_rolle_xml}
 						<ogc:Filter>
 						  	<ogc:FeatureId fid=\"{lx_person_rolle_uuid}{lx_person_rolle_erstellt_am}\" />
@@ -1612,7 +1602,6 @@ impl FortfuehrungsAuftrag {
 						</ogc:Filter>
 					</wfsext:Replace>
 					",
-						nebenbeteiligter_stammnr = nebenbeteiligter_stammnr,
 						lx_person_rolle_xml = lx_person_rolle.get_xml(),
 						lx_person_rolle_uuid = lx_person_rolle.personenrolle_uuid,
 						lx_person_rolle_erstellt_am = lx_person_rolle_erstellt_am.format("%Y%m%dT%H%M%SZ"),

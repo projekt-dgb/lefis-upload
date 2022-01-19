@@ -1,4 +1,4 @@
-#![windows_subsystem = "windows"]
+// #![windows_subsystem = "windows"]
 
 use std::path::Path;
 use oracle::StmtParam;
@@ -307,6 +307,7 @@ pub struct BuchungsblattBezirk {
 #[derive(Default, Debug, Clone, PartialEq)]
 pub struct UiState {
     tab: usize,
+    sub_tab: usize,
 }
 
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
@@ -423,6 +424,10 @@ pub struct LxBuchungsblattBodenordnung {
     pub kan: KennzeichnungAlterNeuerBestand,
     // Ist dieses Blatt ein fiktives Blatt für NB?
     pub nebenbeteiligten_blatt: bool,
+    /// Zu welchen Ordnungsnummern gehört dieses Buchungsblatt
+    /// 
+    /// Kann leer sein, falls NB-Blatt
+    pub gehoert_zu_ordnungsnummern: Vec<usize>,
     // GBVE: Haken
     pub grundbuchvergleich_durchgefuehrt: bool,
     // grundbuchvergleich durchgeführt: bool
@@ -1429,6 +1434,7 @@ impl DhkVerbindung {
                         beg,
                         nebenbeteiligten_blatt,
                         grundbuchvergleich_durchgefuehrt,
+                        gehoert_zu_ordnungsnummern: Vec::new(), // TODO
                         ax_buchungsblatt: AxBuchungsblatt {
                             uuid: ax_buchungsblatt_uuid,
                             lan16,
@@ -1654,7 +1660,6 @@ impl DhkVerbindung {
                 }
             }
 
-
             // Oracle erlaubt kein Schema-Name als Variable
             let query = format!("SELECT VNR, VKBZ, VNAM, UUID FROM {}.LX91003", schema);
 
@@ -1673,9 +1678,10 @@ impl DhkVerbindung {
             .filter_map(|r| r.ok())
             .map(|(vnr, vkbz, vnam, uuid)| {
 
-                let buchungsblatt_bodenordnung = buchungsblatt_bodenordnung_map.get(&uuid).cloned().unwrap_or_default();
+                let mut buchungsblatt_bodenordnung = buchungsblatt_bodenordnung_map.get(&uuid).cloned().unwrap_or_default();
                 let a2 = abteilung2_rechte_in_schema_map.get(&uuid).cloned().unwrap_or_default();
                 let a3 = abteilung3_rechte_in_schema_map.get(&uuid).cloned().unwrap_or_default();
+                let ordnungsnummern = ordnungsnummer_map.get(&uuid).cloned().unwrap_or_default();
 
                 VerfahrenGeladen {
 
@@ -1691,7 +1697,7 @@ impl DhkVerbindung {
                     personen_rollen: lx_personen_rollen_map.get(&uuid).cloned().unwrap_or_default(),
                     buchungsblatt_bodenordnung: buchungsblatt_bodenordnung,
                     buchungsblattbezirke: ax_buchungsblattbezirke_reverse_map.clone(),
-                    ordnungsnummern: ordnungsnummer_map.get(&uuid).cloned().unwrap_or_default(),
+                    ordnungsnummern: ordnungsnummern,
 
                     abt2_rechte: a2,
                     abt3_rechte: a3,

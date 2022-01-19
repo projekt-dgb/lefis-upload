@@ -3,9 +3,15 @@
 
 use azul::widgets::{FileInput, TabHeaderState, FileInputState, CheckBoxState, TextInputState, NumberInputState};
 use azul::task::{ThreadSender, ThreadReceiver};
+use azul::vec::U8Vec;
 use crate::{LefisUploadKonfiguration, exec_sync};
 use crate::wsdl::{ProtokollMsg, AuftragsManager, RequestFailure};
 use crate::GeladeneVerfahren;
+
+const IMG_DONE: &[u8] = include_bytes!("../img/icons8-done-48.png");
+const IMG_CLOSE: &[u8] = include_bytes!("../img/icons8-close-48.png");
+const IMG_DONE_VEC: U8Vec = U8Vec::from_const_slice(IMG_DONE);
+const IMG_CLOSE_VEC: U8Vec = U8Vec::from_const_slice(IMG_CLOSE);
 
 pub mod components {
     #[allow(unused_imports)]
@@ -396,6 +402,17 @@ mod styles {
     ];
     pub(in super) const CSS_MATCH_2875502314340155187: NodeDataInlineCssPropertyVec = NodeDataInlineCssPropertyVec::from_const_slice(CSS_MATCH_2875502314340155187_PROPERTIES);    
 
+    pub(in super) const CSS_MATCH_IMAGE_PROPERTIES: &[NodeDataInlineCssProperty] = &[
+        // .ausgewaehltes-verfahren
+        NodeDataInlineCssProperty::Normal(CssProperty::Width(LayoutWidthValue::Exact(LayoutWidth { inner: PixelValue::const_px(16) }))),
+        NodeDataInlineCssProperty::Normal(CssProperty::MinWidth(LayoutMinWidthValue::Exact(LayoutMinWidth { inner: PixelValue::const_px(16) }))),
+        NodeDataInlineCssProperty::Normal(CssProperty::MaxWidth(LayoutMaxWidthValue::Exact(LayoutMaxWidth { inner: PixelValue::const_px(16) }))),
+        NodeDataInlineCssProperty::Normal(CssProperty::Height(LayoutHeightValue::Exact(LayoutHeight { inner: PixelValue::const_px(16) }))),
+        NodeDataInlineCssProperty::Normal(CssProperty::MinHeight(LayoutMinHeightValue::Exact(LayoutMinHeight { inner: PixelValue::const_px(16) }))),
+        NodeDataInlineCssProperty::Normal(CssProperty::MaxHeight(LayoutMaxHeightValue::Exact(LayoutMaxHeight { inner: PixelValue::const_px(16) }))),
+    ];
+    pub(in super) const CSS_MATCH_IMAGE: NodeDataInlineCssPropertyVec = NodeDataInlineCssPropertyVec::from_const_slice(CSS_MATCH_IMAGE_PROPERTIES);    
+
     pub(in super) const CSS_MATCH_6447022794024462679_PROPERTIES: &[NodeDataInlineCssProperty] = &[
         // .test-buttons>*
         NodeDataInlineCssProperty::Normal(CssProperty::MarginRight(LayoutMarginRightValue::Exact(LayoutMarginRight { inner: PixelValue::const_px(10) }))),
@@ -565,6 +582,9 @@ fn render_verfahren_info(app_data: RefAny, data: &AppData) -> Dom {
 
     use crate::Auftragsstatus;
     use azul::widgets::*;
+    use azul::image::{ImageRef, RawImage};
+    use azul::option::OptionImageRef;
+    use azul::error::ResultRawImageDecodeImageError;
 
     let aw = match data.ausgewaehltes_verfahren.clone() {
         Some(s) => s,
@@ -579,6 +599,26 @@ fn render_verfahren_info(app_data: RefAny, data: &AppData) -> Dom {
     let mut insert = 0;
     let mut replace = 0;
     let mut delete = 0;
+
+    let img_done = match RawImage::decode_image_bytes_any(IMG_DONE_VEC.as_ref_vec()) {
+        ResultRawImageDecodeImageError::Ok(s) => s,
+        ResultRawImageDecodeImageError::Err(_) => return Dom::div(),
+    };
+
+    let img_close = match RawImage::decode_image_bytes_any(IMG_CLOSE_VEC.as_ref_vec()) {
+        ResultRawImageDecodeImageError::Ok(s) => s,
+        ResultRawImageDecodeImageError::Err(_) => return Dom::div(),
+    };
+
+    let img_done = match ImageRef::raw_image(img_done) {
+        OptionImageRef::Some(i) => i,
+        OptionImageRef::None => return Dom::div(),
+    };
+
+    let img_close = match ImageRef::raw_image(img_close) {
+        OptionImageRef::Some(i) => i,
+        OptionImageRef::None => return Dom::div(),
+    };
 
     div::render()
     .with_inline_css_props(CSS_MATCH_2875502314340155187)
@@ -643,6 +683,37 @@ fn render_verfahren_info(app_data: RefAny, data: &AppData) -> Dom {
         ].into()),
 
         match ausgewaehltes_verfahren.ui.tab {
+            0 => {
+                div::render()
+                .with_children(vec![
+                    TabHeader::new(vec![
+                        format!("Alle ({})", ausgewaehltes_verfahren.buchungsblatt_bodenordnung
+                            .iter()
+                            .filter(|i| !i.nebenbeteiligten_blatt)
+                            .count()
+                        ),
+                        format!("Abgeglichen ({})", ausgewaehltes_verfahren.buchungsblatt_bodenordnung
+                            .iter()
+                            .filter(|i| !i.nebenbeteiligten_blatt)
+                            .filter(|i| i.grundbuchvergleich_durchgefuehrt)
+                            .count()
+                        ),
+                        format!("Nicht abgeglichen ({})", ausgewaehltes_verfahren.buchungsblatt_bodenordnung
+                            .iter()
+                            .filter(|i| !i.nebenbeteiligten_blatt)
+                            .filter(|i| !i.grundbuchvergleich_durchgefuehrt)
+                            .count()
+                        ),
+                    ].into())
+                    .with_active_tab(ausgewaehltes_verfahren.ui.sub_tab)
+                    .with_on_click(app_data.clone(), switch_active_sub_tab)
+                    .dom()
+                ].into())
+            }
+            _ => div::render()
+        },
+
+        match ausgewaehltes_verfahren.ui.tab {
             0 => ListView::new(vec![
                 format!("Abgeglichen"),
                 format!("Blatt"),
@@ -651,10 +722,22 @@ fn render_verfahren_info(app_data: RefAny, data: &AppData) -> Dom {
             .with_rows(ausgewaehltes_verfahren.buchungsblatt_bodenordnung
                 .iter()
                 .filter(|gb| !gb.nebenbeteiligten_blatt)
+                .filter(|gb| {
+                    match ausgewaehltes_verfahren.ui.sub_tab {
+                        1 => gb.grundbuchvergleich_durchgefuehrt,
+                        2 => !gb.grundbuchvergleich_durchgefuehrt,
+                        _ => true,
+                    }
+                })
                 .take(20)
                 .map(|gb| ListViewRow {
                     cells: vec![
-                        CheckBox::new(gb.grundbuchvergleich_durchgefuehrt).dom(),
+                        if gb.grundbuchvergleich_durchgefuehrt {
+                            Dom::image(img_done.clone())
+                        } else {
+                            Dom::image(img_close.clone())
+                        }
+                        .with_inline_css_props(CSS_MATCH_IMAGE),
                         p::render(gb.ax_buchungsblatt.bbb_name.clone().unwrap_or_default().into()),
                         p::render(format!("{}", gb.ax_buchungsblatt.bbn).into()),
                     ].into(),
@@ -962,6 +1045,29 @@ fn switch_active_tab(data: &mut RefAny, _info: &mut CallbackInfo, th: &TabHeader
     };
 
     aktives_verfahren.ui.tab = th.active_tab;
+
+    Update::RefreshDom
+}
+
+extern "C"
+fn switch_active_sub_tab(data: &mut RefAny, _info: &mut CallbackInfo, th: &TabHeaderState) -> Update {
+
+    use crate::{LefisDatei, Auftragsstatus};
+    use azul::dialog::MsgBox;
+
+    let mut data_mut = match data.downcast_mut::<AppData>() {
+        Some(s) => s,
+        None => return Update::DoNothing,
+    };
+
+    let data_mut = &mut *data_mut;
+
+    let aktives_verfahren = match data_mut.ausgewaehltes_verfahren.clone().and_then(|d| data_mut.geladene_verfahren.verfahren.iter_mut().find(|v| v.uuid == d)) {
+        Some(s) => s,
+        None => return Update::DoNothing,
+    };
+
+    aktives_verfahren.ui.sub_tab = th.active_tab;
 
     Update::RefreshDom
 }
@@ -2226,7 +2332,7 @@ async fn warte_auf_auftrag_fortfuehrung(am: &AuftragsManager, session_id: usize,
     loop {
         
         let status = am.list_auftrag(session_id, auftragsnummer).await?;
-        
+
         match status.status {
             18 => break,
             1 | 3 => {
@@ -2680,7 +2786,7 @@ fn ffa_aus_datei_ausfuehren(app_data: &mut RefAny, info: &mut CallbackInfo) -> U
     let init_data = RefAny::new(XmlBackgroundThreadInit {
         konfiguration: data.konfiguration.clone(),
         verfahren_uuid: verfahren.uuid.clone(),
-        xml: get_verfahren_grundbuchhaken(&verfahren, false),
+        xml: datei.trim().to_string(),
     });
 
     let _ = match info.start_thread(init_data, data_clone, xml_ffa_background_thread).into_option() {
@@ -2694,6 +2800,8 @@ fn ffa_aus_datei_ausfuehren(app_data: &mut RefAny, info: &mut CallbackInfo) -> U
 extern "C"
 fn gbve_alle_haken_loeschen(app_data: &mut RefAny, info: &mut CallbackInfo) -> Update {
     
+    use azul::dialog::FileDialog;
+
     let data_clone = app_data.clone();
     let data = match app_data.downcast_ref::<AppData>() {
         Some(s) => s,
@@ -2709,16 +2817,15 @@ fn gbve_alle_haken_loeschen(app_data: &mut RefAny, info: &mut CallbackInfo) -> U
         None => { return Update::DoNothing; },
     };
 
-    let init_data = RefAny::new(XmlBackgroundThreadInit {
-        konfiguration: data.konfiguration.clone(),
-        verfahren_uuid: verfahren.uuid.clone(),
-        xml: get_verfahren_grundbuchhaken(&verfahren, false),
-    });
+    let xml = get_verfahren_grundbuchhaken(&verfahren, false).trim().to_string();
 
-    let _ = match info.start_thread(init_data, data_clone, xml_ffa_background_thread).into_option() {
+    let datei_pfad = match FileDialog::save_file("Fortführungsauftrag speichern unter".into(), None.into()).into_option() {
         Some(s) => s,
-        None => return Update::DoNothing, // thread creation failed
+        None => { return Update::DoNothing; },
     };
+    let datei_pfad = datei_pfad.as_str().to_string();
+
+    let _ = std::fs::write(&datei_pfad, &xml.as_bytes());
 
     Update::RefreshDom
 }
@@ -2732,6 +2839,12 @@ fn get_verfahren_grundbuchhaken(verfahren: &VerfahrenGeladen, haken_setzen: bool
 
     for buchungsblatt in verfahren.buchungsblatt_bodenordnung.iter()
         .filter(|gb| !gb.nebenbeteiligten_blatt)
+        .filter(|gb| gb.ax_buchungsblatt.blt == 1000)
+        .filter(|gb| if haken_setzen {
+            !gb.grundbuchvergleich_durchgefuehrt
+        } else {
+            gb.grundbuchvergleich_durchgefuehrt
+        })
         .filter(|gb| gb.kan == KennzeichnungAlterNeuerBestand::AlterBestand) {
 
         xml.push_str(&format!("
@@ -2816,6 +2929,8 @@ fn get_verfahren_grundbuchhaken(verfahren: &VerfahrenGeladen, haken_setzen: bool
 extern "C"
 fn gbve_alle_haken_setzen(app_data: &mut RefAny, info: &mut CallbackInfo) -> Update {
     
+    use azul::dialog::FileDialog;
+
     let data_clone = app_data.clone();
     let data = match app_data.downcast_ref::<AppData>() {
         Some(s) => s,
@@ -2831,16 +2946,15 @@ fn gbve_alle_haken_setzen(app_data: &mut RefAny, info: &mut CallbackInfo) -> Upd
         None => { return Update::DoNothing; },
     };
 
-    let init_data = RefAny::new(XmlBackgroundThreadInit {
-        konfiguration: data.konfiguration.clone(),
-        verfahren_uuid: verfahren.uuid.clone(),
-        xml: get_verfahren_grundbuchhaken(&verfahren, true),
-    });
+    let xml = get_verfahren_grundbuchhaken(&verfahren, true).trim().to_string();
 
-    let _ = match info.start_thread(init_data, data_clone, xml_ffa_background_thread).into_option() {
+    let datei_pfad = match FileDialog::save_file("Fortführungsauftrag speichern unter".into(), None.into()).into_option() {
         Some(s) => s,
-        None => return Update::DoNothing, // thread creation failed
+        None => { return Update::DoNothing; },
     };
+    let datei_pfad = datei_pfad.as_str().to_string();
+
+    let _ = std::fs::write(&datei_pfad, &xml.as_bytes());
 
     Update::RefreshDom
 }
