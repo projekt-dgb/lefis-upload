@@ -18,7 +18,7 @@ use crate::wsdl::{
     Anrede, ProtokollMsg, 
     RequestFailure, KennzeichnungAlterNeuerBestand
 };
-use chrono::{DateTime, Utc};
+use chrono::{DateTime, Local, Utc};
 use std::collections::BTreeMap;
 
 pub mod ui;
@@ -401,7 +401,7 @@ pub struct LxAbteilung2 {
     pub uuid: String,
     pub erstellt_am: DateTime<Utc>,
     // Recht gelöscht: ENDE != NULL
-    pub ende: Option<DateTime<Utc>>,
+    pub ende: Option<DateTime<Local>>,
     pub lfd_nr: usize,
     pub buchungsstellen: Vec<AxBuchungsstelle>,
 }
@@ -412,7 +412,7 @@ pub struct LxAbteilung3 {
     pub uuid: String,
     pub erstellt_am: DateTime<Utc>,
     // Recht gelöscht: ENDE != NULL
-    pub ende: Option<DateTime<Utc>>,
+    pub ende: Option<DateTime<Local>>,
     pub lfd_nr: usize,
     pub buchungsstellen: Vec<AxBuchungsstelle>,
 }
@@ -882,7 +882,7 @@ pub struct NebenbeteiligterExtra {
     pub vorname: Option<String>,
     pub nachname_oder_firma: Option<String>,
     pub geburtsname: Option<String>,
-    pub geburtsdatum: Option<DateTime<Utc>>,
+    pub geburtsdatum: Option<DateTime<Local>>,
     pub wohnort: Option<String>,
 }
 
@@ -1050,17 +1050,17 @@ impl DhkVerbindung {
             let mut lx_person_map = BTreeMap::new();
             if let Ok(rr) = stmt.query_as::<(
                 String, 
-                DateTime<Utc>, 
+                DateTime<Local>, 
                 String, 
 
                 String,
-                DateTime<Utc>, 
+                DateTime<Local>, 
                 Option<usize>,
                 Option<String>, 
                 Option<String>, 
                 Option<String>, 
                 Option<String>, 
-                Option<DateTime<Utc>>, 
+                Option<DateTime<Local>>, 
                 Option<String>, 
                 Option<String>, 
                 Option<String>, 
@@ -1095,10 +1095,10 @@ impl DhkVerbindung {
                     .or_insert_with(|| Vec::new())
                     .push(LxPerson {
                         uuid,
-                        beg,
+                        beg: beg.into(),
                         ax_person: AxPerson {
                             uuid: ax_uuid,
-                            beg: ax_beg,
+                            beg: ax_beg.into(),
                             anrede: ax_anrede,
                             titel: ax_nba,
                             vorname: ax_vorname,
@@ -1127,7 +1127,7 @@ impl DhkVerbindung {
             })?;
 
             let mut lx_personen_rollen_map = BTreeMap::new();
-            match stmt.query_as::<(String, DateTime<Utc>, usize, String, String, String)>(&[]) {
+            match stmt.query_as::<(String, DateTime<Local>, usize, String, String, String)>(&[]) {
                 Ok(rr) => {
                     for (person_rolle_uuid, person_rolle_beg, adet, verfahren_uuid, person_uuid, lx_namensnummer_uuid) in rr.into_iter().filter_map(|r| r.ok()) {
                          
@@ -1141,7 +1141,7 @@ impl DhkVerbindung {
                          .or_insert_with(|| Vec::new())
                          .push(LxPersonRolle {
                              uuid: person_rolle_uuid,
-                             beg: person_rolle_beg,
+                             beg: person_rolle_beg.into(),
                              art,
                              person_uuid: person_uuid,
                              lx_namensnummer_uuid: lx_namensnummer_uuid,
@@ -1397,7 +1397,7 @@ impl DhkVerbindung {
             })?;
         
             let mut buchungsblatt_bodenordnung_map = BTreeMap::new();
-            if let Ok(rr) = stmt.query_as::<(String, DateTime<Utc>, String, usize, usize, usize, String, usize, usize, usize, usize)>(&[]) {
+            if let Ok(rr) = stmt.query_as::<(String, DateTime<Local>, String, usize, usize, usize, String, usize, usize, usize, usize)>(&[]) {
 
                 let buchungsblatt_bodenordnung = rr
                 .into_iter()
@@ -1431,7 +1431,7 @@ impl DhkVerbindung {
                     Ok((verfahren_uuid.clone(), LxBuchungsblattBodenordnung {
                         uuid,
                         kan,
-                        beg,
+                        beg: beg.into(),
                         nebenbeteiligten_blatt,
                         grundbuchvergleich_durchgefuehrt,
                         gehoert_zu_ordnungsnummern: Vec::new(), // TODO
@@ -1496,7 +1496,7 @@ impl DhkVerbindung {
 
             let mut abteilung2_rechte_in_schema_map = BTreeMap::new();
 
-            if let Ok(rr) = stmt.query_as::<(String, DateTime<Utc>, Option<DateTime<Utc>>, usize, String, String, DateTime<Utc>)>(&[]) {
+            if let Ok(rr) = stmt.query_as::<(String, DateTime<Local>, Option<DateTime<Local>>, usize, String, String, DateTime<Local>)>(&[]) {
 
                 let abteilung2_rechte_in_schema = rr
                 .into_iter()
@@ -1542,7 +1542,7 @@ impl DhkVerbindung {
 
                         buchungsstellen.push(AxBuchungsstelle {
                             lx21004: buchungsstelle_belastet_uuid.clone(),
-                            lx21004_erstellt_am,
+                            lx21004_erstellt_am: lx21004_erstellt_am.into(),
                             lfd_nr_grundbuch: lfd_nr,
                             lx21008: lx21008.clone(),
                             ax21008,
@@ -1552,7 +1552,7 @@ impl DhkVerbindung {
 
                     Ok((verfahren_uuid.clone(), LxAbteilung2 {
                         uuid,
-                        erstellt_am,
+                        erstellt_am: erstellt_am.into(),
                         ende,
                         lfd_nr,
                         buchungsstellen,
@@ -1586,7 +1586,7 @@ impl DhkVerbindung {
             })?;
 
             let mut abteilung3_rechte_in_schema_map = BTreeMap::<String, Vec<LxAbteilung3>>::new();
-            if let Ok(rr) = stmt.query_as::<(String, DateTime<Utc>, Option<DateTime<Utc>>, usize, String, String, DateTime<Utc>)>(&[]) {
+            if let Ok(rr) = stmt.query_as::<(String, DateTime<Local>, Option<DateTime<Local>>, usize, String, String, DateTime<Local>)>(&[]) {
 
                 let abteilung3_rechte_in_schema = rr
                 .into_iter()
@@ -1631,7 +1631,7 @@ impl DhkVerbindung {
 
                         buchungsstellen.push(AxBuchungsstelle {
                             lx21004: buchungsstelle_belastet_uuid.clone(),
-                            lx21004_erstellt_am,
+                            lx21004_erstellt_am: lx21004_erstellt_am.into(),
                             lfd_nr_grundbuch: lfd_nr,
                             lx21008: lx21008.clone(),
                             ax21008,
@@ -1642,7 +1642,7 @@ impl DhkVerbindung {
                     Ok((verfahren_uuid.clone(), LxAbteilung3 {
                         uuid,
                         ende,
-                        erstellt_am,
+                        erstellt_am: erstellt_am.into(),
                         lfd_nr,
                         buchungsstellen,
                     }))

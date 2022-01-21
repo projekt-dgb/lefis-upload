@@ -1994,12 +1994,12 @@ fn generiere_ffa(
                     grundbuch_name: grundbuch_name.clone(),
                     lfd_nr: abt2.lfd_nr,
                     uuid: abt2.uuid.clone(),
-                    erstellt_am: abt2.erstellt_am.clone(), 
+                    erstellt_am: abt2.erstellt_am.clone().into(), 
                     insert,
                 }); 
                 replace.push(FfaReplace::BuchungsstelleBelastetAbt2 {
                     uuid: buchungsstelle.lx21004.clone(),
-                    erstellt_am: buchungsstelle.lx21004_erstellt_am.clone(), 
+                    erstellt_am: buchungsstelle.lx21004_erstellt_am.clone().into(), 
                     insert: insert_buchungsstelle,
                 }); 
             } else {
@@ -2007,11 +2007,11 @@ fn generiere_ffa(
                     grundbuch_name: grundbuch_name.clone(),
                     lfd_nr: abt2.lfd_nr,
                     uuid: abt2.uuid.clone(),
-                    erstellt_am: abt2.erstellt_am.clone(), 
+                    erstellt_am: abt2.erstellt_am.clone().into(), 
                 }); 
                 delete.push(FfaDelete::BuchungsstelleBelastet { 
                     uuid: buchungsstelle.lx21004.clone(),
-                    erstellt_am: buchungsstelle.lx21004_erstellt_am.clone(), 
+                    erstellt_am: buchungsstelle.lx21004_erstellt_am.clone().into(), 
                 });
             }
         }
@@ -2062,12 +2062,12 @@ fn generiere_ffa(
                     grundbuch_name: grundbuch_name.clone(),
                     lfd_nr: abt3.lfd_nr,
                     uuid: abt3.uuid.clone(),
-                    erstellt_am: abt3.erstellt_am.clone(), 
+                    erstellt_am: abt3.erstellt_am.clone().into(), 
                     insert,
                 }); 
                 replace.push(FfaReplace::BuchungsstelleBelastetAbt3 {
                     uuid: buchungsstelle.lx21004.clone(),
-                    erstellt_am: buchungsstelle.lx21004_erstellt_am.clone(), 
+                    erstellt_am: buchungsstelle.lx21004_erstellt_am.clone().into(), 
                     insert: insert_buchungsstelle,
                 }); 
             } else {
@@ -2075,11 +2075,11 @@ fn generiere_ffa(
                     grundbuch_name: grundbuch_name.clone(),
                     lfd_nr: abt3.lfd_nr,
                     uuid: abt3.uuid.clone(),
-                    erstellt_am: abt3.erstellt_am.clone(), 
+                    erstellt_am: abt3.erstellt_am.clone().into(), 
                 });
                 delete.push(FfaDelete::BuchungsstelleBelastet { 
                     uuid: buchungsstelle.lx21004.clone(),
-                    erstellt_am: buchungsstelle.lx21004_erstellt_am.clone(), 
+                    erstellt_am: buchungsstelle.lx21004_erstellt_am.clone().into(), 
                 });
             }
         }
@@ -2167,7 +2167,7 @@ fn generiere_ffa(
 
                 global_replace.push(FfaReplace::NebenbeteiligterReplace {
                     nebenbeteiligter_stammnr: onr,
-                    lx_person_rolle_erstellt_am: person_rolle.beg.clone(),
+                    lx_person_rolle_erstellt_am: person_rolle.beg.clone().into(), 
                     lx_person_rolle: FfaLxPersonRolle {
                         personenrolle_uuid: person_rolle.uuid.clone(),
                         beginnt_datum: jetzt.clone(),
@@ -2175,7 +2175,7 @@ fn generiere_ffa(
                         verfahren_uuid: verfahren.uuid.clone(),
                     },
 
-                    lx_person_erstellt_am: lx_person.beg.clone(),
+                    lx_person_erstellt_am: lx_person.beg.clone().into(), 
                     lx_person: FfaLxPerson {
                         lx_person_uuid: lx_person.uuid.clone(),
                         beginnt_datum: jetzt.clone(),
@@ -2184,7 +2184,7 @@ fn generiere_ffa(
                         ax_person_uuid: lx_person.ax_person.uuid.clone(),
                     },
 
-                    ax_person_erstellt_am: lx_person.ax_person.beg.clone(),
+                    ax_person_erstellt_am: lx_person.ax_person.beg.clone().into(), 
                     ax_person: FfaAxPerson {
                         ax_person_uuid: lx_person.ax_person.uuid.clone(),
                         beginnt_datum: jetzt.clone(),
@@ -2194,7 +2194,7 @@ fn generiere_ffa(
                         vorname: nb.extra.vorname.clone(),
                         nachname_oder_firma: nb.extra.nachname_oder_firma.unwrap_or(nb.name.trim().to_string()),
                         geburtsname: nb.extra.geburtsname.clone(),
-                        geburtsdatum: nb.extra.geburtsdatum.clone(),
+                        geburtsdatum: nb.extra.geburtsdatum.clone().map(|o| o.into()),
                         wohnort: nb.extra.wohnort.clone(),
                     },
                 });
@@ -2220,7 +2220,7 @@ fn generiere_ffa(
                     vorname: nb.extra.vorname.clone(),
                     nachname_oder_firma: nb.extra.nachname_oder_firma.unwrap_or(nb.name.trim().to_string()),
                     geburtsname: nb.extra.geburtsname.clone(),
-                    geburtsdatum: nb.extra.geburtsdatum.clone(),
+                    geburtsdatum: nb.extra.geburtsdatum.clone().map(|o| o.into()),
                     wohnort: nb.extra.wohnort.clone(),
 
                     buchungsblatt_uuid: generiere_neue_uuid(),
