@@ -1095,10 +1095,10 @@ impl DhkVerbindung {
                     .or_insert_with(|| Vec::new())
                     .push(LxPerson {
                         uuid,
-                        beg: beg.into(),
+                        beg: local_to_utc(beg),
                         ax_person: AxPerson {
                             uuid: ax_uuid,
-                            beg: ax_beg.into(),
+                            beg: local_to_utc(ax_beg),
                             anrede: ax_anrede,
                             titel: ax_nba,
                             vorname: ax_vorname,
@@ -1141,7 +1141,7 @@ impl DhkVerbindung {
                          .or_insert_with(|| Vec::new())
                          .push(LxPersonRolle {
                              uuid: person_rolle_uuid,
-                             beg: person_rolle_beg.into(),
+                             beg: local_to_utc(person_rolle_beg),
                              art,
                              person_uuid: person_uuid,
                              lx_namensnummer_uuid: lx_namensnummer_uuid,
@@ -1431,7 +1431,7 @@ impl DhkVerbindung {
                     Ok((verfahren_uuid.clone(), LxBuchungsblattBodenordnung {
                         uuid,
                         kan,
-                        beg: beg.into(),
+                        beg: local_to_utc(beg),
                         nebenbeteiligten_blatt,
                         grundbuchvergleich_durchgefuehrt,
                         gehoert_zu_ordnungsnummern: Vec::new(), // TODO
@@ -1724,8 +1724,13 @@ impl DhkVerbindung {
     }
 }
 
+// Due to problems with compiling TzSpecificLocalTimeToSystemTime
+// between 32-bit / 64-bit, do the conversion manually
+fn local_to_utc(input: DateTime<Local>) -> DateTime<Utc> {
+    input.into()
+}
 
-extern "C" fn render(data: &mut RefAny, _: &mut LayoutCallbackInfo) -> StyledDom {
+extern "C" fn render(data: &mut RefAny, _: &mut LayoutCallbackInfo) -> StyledDom {    
     let data_clone = data.clone();
     let data = match data.downcast_ref::<AppData>() {
         Some(s) => s,
