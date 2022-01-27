@@ -2186,7 +2186,7 @@ fn generiere_ffa(
                     lx_person_rolle_erstellt_am: person_rolle.beg.clone().into(), 
                     lx_person_rolle: FfaLxPersonRolle {
                         personenrolle_uuid: person_rolle.uuid.clone(),
-                        beginnt_datum: jetzt.clone(),
+                        beginnt_datum: person_rolle.beg.clone(),
                         kan: KennzeichnungAlterNeuerBestand::AlterBestand,
                         verfahren_uuid: verfahren.uuid.clone(),
                     },
@@ -2194,7 +2194,7 @@ fn generiere_ffa(
                     lx_person_erstellt_am: lx_person.beg.clone().into(), 
                     lx_person: FfaLxPerson {
                         lx_person_uuid: lx_person.uuid.clone(),
-                        beginnt_datum: jetzt.clone(),
+                        beginnt_datum: lx_person.beg.clone(),
                         verfahren_uuid: verfahren.uuid.clone(),
                         personenrolle_uuid: person_rolle.uuid.clone(),
                         ax_person_uuid: lx_person.ax_person.uuid.clone(),
@@ -2203,7 +2203,7 @@ fn generiere_ffa(
                     ax_person_erstellt_am: lx_person.ax_person.beg.clone().into(), 
                     ax_person: FfaAxPerson {
                         ax_person_uuid: lx_person.ax_person.uuid.clone(),
-                        beginnt_datum: jetzt.clone(),
+                        beginnt_datum: lx_person.ax_person.beg.clone(),
                         
                         anrede: nb.extra.anrede.clone(),
                         titel: nb.extra.titel.clone(),
@@ -2848,10 +2848,13 @@ fn gbve_alle_haken_loeschen(app_data: &mut RefAny, info: &mut CallbackInfo) -> U
 
 fn get_verfahren_grundbuchhaken(verfahren: &VerfahrenGeladen, haken_setzen: bool) -> String {
     
-    use crate::wsdl::KennzeichnungAlterNeuerBestand;
+    use crate::wsdl::{KennzeichnungAlterNeuerBestand, FfaLxOrdnungsNummerBodenordnung};
     use chrono::SecondsFormat;
+    use std::collections::BTreeMap;
 
     let mut xml = String::new();
+
+    let mut ordnungsnummern = BTreeMap::new();
 
     for buchungsblatt in verfahren.buchungsblatt_bodenordnung.iter()
         .filter(|gb| !gb.nebenbeteiligten_blatt)
@@ -2863,6 +2866,12 @@ fn get_verfahren_grundbuchhaken(verfahren: &VerfahrenGeladen, haken_setzen: bool
         } else {
             gb.grundbuchvergleich_durchgefuehrt
         }) {
+
+        for onr in buchungsblatt.gehoert_zu_ordnungsnummern.iter() {
+            ordnungsnummern.entry(onr.clone())
+            .or_insert_with(|| Vec::new())
+            .push(buchungsblatt.uuid.clone());
+        }
 
         xml.push_str(&format!("
             <wfsext:Replace vendorId=\"AdV\" safeToIgnore=\"false\">
@@ -2899,6 +2908,28 @@ fn get_verfahren_grundbuchhaken(verfahren: &VerfahrenGeladen, haken_setzen: bool
             verfahren_uuid = verfahren.uuid,
             ax_buchungsblatt_uuid = buchungsblatt.ax_buchungsblatt.uuid,
             haken_setzen = if haken_setzen { "true" } else { "false" },
+        ));
+    }
+
+    for (onr, grundbucheigentum) in ordnungsnummern {
+        xml.push_str(&format!("
+            <wfsext:Replace vendorId=\"AdV\" safeToIgnore=\"false\">
+                {insert}
+                <ogc:Filter>
+                    <ogc:FeatureId fid=\"{uuid}{erstellt_am}\" />
+                </ogc:Filter>
+            </wfsext:Replace>
+        ", insert = FfaLxOrdnungsNummerBodenordnung {
+                ordnungsnummer_bodenordnung_uuid: onr.uuid.clone(),
+                beginnt_datum: onr.beg,
+                kan: onr.kan,
+                verfahren_uuid: verfahren.uuid.clone(),
+                grundbucheigentum: grundbucheigentum.clone(),
+                stammnummer: onr.stammnummer,
+                unternummer: onr.unternummer,
+            }.get_xml(),
+            uuid = onr.uuid,
+            erstellt_am = onr.beg.format("%Y%m%dT%H%M%SZ"),
         ));
     }
 

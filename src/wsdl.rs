@@ -1228,6 +1228,76 @@ impl Anrede {
 	}
 }
 
+#[derive(Debug, Clone, PartialEq)]
+pub struct FfaLxOrdnungsNummerBodenordnung {
+	pub ordnungsnummer_bodenordnung_uuid: String,
+	pub beginnt_datum: DateTime<Utc>,
+	pub kan: KennzeichnungAlterNeuerBestand,
+	pub verfahren_uuid: String,
+	pub grundbucheigentum: Vec<String>,
+	pub stammnummer: usize,
+	pub unternummer: usize,
+}
+
+impl FfaLxOrdnungsNummerBodenordnung {
+	pub fn get_xml(&self) -> String {
+		
+		let FfaLxOrdnungsNummerBodenordnung {
+			ordnungsnummer_bodenordnung_uuid,
+			beginnt_datum,
+			kan,
+			verfahren_uuid,
+			grundbucheigentum,
+			stammnummer,
+			unternummer,
+		} = self;
+
+		format!("
+			<lefis:LX_OrdnungsnummerBodenordnung gml:id=\"{ordnungsnummer_bodenordnung_uuid}\">
+			  <gml:identifier codeSpace=\"http://www.adv-online.de/\">urn:adv:oid:{ordnungsnummer_bodenordnung_uuid}</gml:identifier>
+			  <lebenszeitintervall>
+			    <AA_Lebenszeitintervall>
+			      <beginnt>{beginnt_datum}</beginnt>
+			    </AA_Lebenszeitintervall>
+			  </lebenszeitintervall>
+			  <modellart>
+			    <AA_Modellart>
+			      <sonstigesModell>LEFIS</sonstigesModell>
+			    </AA_Modellart>
+			  </modellart>
+			  <lefis:kan>{kan}</lefis:kan>
+			  <lefis:gehoertZuVerfahren xlink:href=\"urn:adv:oid:{verfahren_uuid}\" />
+			  <lefis:unterliegtDemNachtrag>false</lefis:unterliegtDemNachtrag>
+			  <lefis:unterliegtEinerPlantextziffer>true</lefis:unterliegtEinerPlantextziffer>
+			  <lefis:kopierVorgangErfolgt>false</lefis:kopierVorgangErfolgt>
+			  {grundbucheigentum}
+			  <lefis:anspruchsWert>0</lefis:anspruchsWert>
+			  <lefis:einlageWert>0</lefis:einlageWert>
+			  <lefis:ordnungsnummer>
+			    <lefis:LX_Ordnungsnummer>
+			      <lefis:stammnummer>{stammnummer}</lefis:stammnummer>
+			      <lefis:unternummer>{unternummer}</lefis:unternummer>
+			      <lefis:rechtsverhaeltnis>0</lefis:rechtsverhaeltnis>
+			    </lefis:LX_Ordnungsnummer>
+			  </lefis:ordnungsnummer>
+			  <lefis:rechtsbehelf>9999</lefis:rechtsbehelf>
+			  <lefis:ansprechpartner>(Nachname, Vorname)</lefis:ansprechpartner>
+			  <lefis:funktion>9999</lefis:funktion>
+			</lefis:LX_OrdnungsnummerBodenordnung>
+		",
+			ordnungsnummer_bodenordnung_uuid = ordnungsnummer_bodenordnung_uuid,
+			beginnt_datum = beginnt_datum.to_rfc3339_opts(SecondsFormat::Secs, true),
+			kan = kan.code(),
+			verfahren_uuid = verfahren_uuid,
+			grundbucheigentum = grundbucheigentum.iter().map(|buchungsblatt_uuid| {
+				format!("<lefis:hatGrundbucheigentum xlink:href=\"urn:adv:oid:{}\" />", buchungsblatt_uuid)
+			}).collect::<Vec<_>>().join("\r\n"),
+			stammnummer = stammnummer,
+			unternummer = unternummer,
+		)
+	}
+}
+
 impl FfaLxOrdnungsNummer {
 	pub fn get_xml(&self) -> String {
 
@@ -1257,47 +1327,15 @@ impl FfaLxOrdnungsNummer {
 			lx_namensnummer_uuid,
 		} = self;
 
-		let lx_ordnungsnummer_bodenordnung = format!("
-			<lefis:LX_OrdnungsnummerBodenordnung gml:id=\"{ordnungsnummer_bodenordnung_uuid}\">
-			  <gml:identifier codeSpace=\"http://www.adv-online.de/\">urn:adv:oid:{ordnungsnummer_bodenordnung_uuid}</gml:identifier>
-			  <lebenszeitintervall>
-			    <AA_Lebenszeitintervall>
-			      <beginnt>{beginnt_datum}</beginnt>
-			    </AA_Lebenszeitintervall>
-			  </lebenszeitintervall>
-			  <modellart>
-			    <AA_Modellart>
-			      <sonstigesModell>LEFIS</sonstigesModell>
-			    </AA_Modellart>
-			  </modellart>
-			  <lefis:kan>{kan}</lefis:kan>
-			  <lefis:gehoertZuVerfahren xlink:href=\"urn:adv:oid:{verfahren_uuid}\" />
-			  <lefis:unterliegtDemNachtrag>false</lefis:unterliegtDemNachtrag>
-			  <lefis:unterliegtEinerPlantextziffer>true</lefis:unterliegtEinerPlantextziffer>
-			  <lefis:kopierVorgangErfolgt>false</lefis:kopierVorgangErfolgt>
-			  <lefis:hatGrundbucheigentum xlink:href=\"urn:adv:oid:{buchungsblatt_uuid}\" />
-			  <lefis:anspruchsWert>0</lefis:anspruchsWert>
-			  <lefis:einlageWert>0</lefis:einlageWert>
-			  <lefis:ordnungsnummer>
-			    <lefis:LX_Ordnungsnummer>
-			      <lefis:stammnummer>{stammnummer}</lefis:stammnummer>
-			      <lefis:unternummer>{unternummer}</lefis:unternummer>
-			      <lefis:rechtsverhaeltnis>0</lefis:rechtsverhaeltnis>
-			    </lefis:LX_Ordnungsnummer>
-			  </lefis:ordnungsnummer>
-			  <lefis:rechtsbehelf>9999</lefis:rechtsbehelf>
-			  <lefis:ansprechpartner>(Nachname, Vorname)</lefis:ansprechpartner>
-			  <lefis:funktion>9999</lefis:funktion>
-			</lefis:LX_OrdnungsnummerBodenordnung>
-		",
-			ordnungsnummer_bodenordnung_uuid = ordnungsnummer_bodenordnung_uuid,
-			beginnt_datum = beginnt_datum.to_rfc3339_opts(SecondsFormat::Secs, true),
-			kan = kan.code(),
-			verfahren_uuid = verfahren_uuid,
-			buchungsblatt_uuid = buchungsblatt_uuid,
-			stammnummer = stammnummer,
-			unternummer = unternummer,
-		);
+		let lx_ordnungsnummer_bodenordnung = FfaLxOrdnungsNummerBodenordnung {
+			ordnungsnummer_bodenordnung_uuid: ordnungsnummer_bodenordnung_uuid.clone(),
+			beginnt_datum: beginnt_datum.clone(),
+			kan: kan.clone(),
+			verfahren_uuid: verfahren_uuid.clone(),
+			grundbucheigentum: vec![buchungsblatt_uuid.clone()],
+			stammnummer: *stammnummer,
+			unternummer: *unternummer,
+		}.get_xml();
 
 		let personenrolle = FfaLxPersonRolle {
 			personenrolle_uuid: personenrolle_uuid.clone(),

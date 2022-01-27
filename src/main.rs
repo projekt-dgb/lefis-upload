@@ -1,7 +1,7 @@
 // #![windows_subsystem = "windows"]
 
 use std::path::Path;
-use oracle::StmtParam;
+use oracle::{StmtParam, sql_type::Timestamp};
 use serde_derive::{Serialize, Deserialize};
 use core::future::Future;
 use lazy_static::lazy_static;
@@ -18,7 +18,7 @@ use crate::wsdl::{
     Anrede, ProtokollMsg, 
     RequestFailure, KennzeichnungAlterNeuerBestand
 };
-use chrono::{DateTime, FixedOffset, Utc};
+use chrono::{DateTime, Local, TimeZone, FixedOffset, Utc};
 use std::collections::BTreeMap;
 
 pub mod ui;
@@ -246,17 +246,21 @@ pub struct LxPersonRolle {
     pub lx_namensnummer_uuid: String,
 }
 
-#[derive(Default, Debug, Clone, Ord, PartialOrd, Eq, PartialEq, Serialize, Deserialize)]
+#[derive(Debug, Clone, Ord, PartialOrd, Eq, PartialEq, Serialize, Deserialize)]
 pub struct OrdnungsnummerBodenordnungKeinePerson {
     pub uuid: String,
+    pub kan: KennzeichnungAlterNeuerBestand,
+    pub beg: DateTime<Utc>,
     pub stammnummer: usize,
     pub unternummer: usize,
 }
 
 // LX22003
-#[derive(Default, Debug, Clone, PartialEq, Serialize, Deserialize)]
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
 pub struct OrdnungsnummerBodenordnung {
     pub uuid: String,
+    pub kan: KennzeichnungAlterNeuerBestand,
+    pub beg: DateTime<Utc>,
     pub stammnummer: usize,
     pub unternummer: usize,
     // A_LX22003_LX21007
@@ -408,7 +412,7 @@ pub struct LxAbteilung2 {
     pub uuid: String,
     pub erstellt_am: DateTime<Utc>,
     // Recht gelöscht: ENDE != NULL
-    pub ende: Option<DateTime<FixedOffset>>,
+    pub ende: Option<DateTime<Local>>,
     pub lfd_nr: usize,
     pub buchungsstellen: Vec<AxBuchungsstelle>,
 }
@@ -419,7 +423,7 @@ pub struct LxAbteilung3 {
     pub uuid: String,
     pub erstellt_am: DateTime<Utc>,
     // Recht gelöscht: ENDE != NULL
-    pub ende: Option<DateTime<FixedOffset>>,
+    pub ende: Option<DateTime<Local>>,
     pub lfd_nr: usize,
     pub buchungsstellen: Vec<AxBuchungsstelle>,
 }
@@ -889,7 +893,7 @@ pub struct NebenbeteiligterExtra {
     pub vorname: Option<String>,
     pub nachname_oder_firma: Option<String>,
     pub geburtsname: Option<String>,
-    pub geburtsdatum: Option<DateTime<FixedOffset>>,
+    pub geburtsdatum: Option<DateTime<Utc>>,
     pub wohnort: Option<String>,
 }
 
@@ -1057,17 +1061,17 @@ impl DhkVerbindung {
             let mut lx_person_map = BTreeMap::new();
             if let Ok(rr) = stmt.query_as::<(
                 String, 
-                DateTime<FixedOffset>,
+                DateTime<Local>,
                 String, 
 
                 String,
-                DateTime<FixedOffset>,
+                DateTime<Local>,
                 Option<usize>,
                 Option<String>, 
                 Option<String>, 
                 Option<String>, 
                 Option<String>, 
-                Option<DateTime<FixedOffset>>, 
+                Option<Timestamp>, 
                 Option<String>, 
                 Option<String>, 
                 Option<String>, 
@@ -1134,7 +1138,7 @@ impl DhkVerbindung {
             })?;
 
             let mut lx_personen_rollen_map = BTreeMap::new();
-            match stmt.query_as::<(String, DateTime<FixedOffset>, usize, String, String, String)>(&[]) {
+            match stmt.query_as::<(String, DateTime<Local>, usize, String, String, String)>(&[]) {
                 Ok(rr) => {
                     for (
                         person_rolle_uuid, 
@@ -1193,7 +1197,7 @@ impl DhkVerbindung {
 
             // Lade alle LX_Ordnungsnummer_Bodenordnung inkl. Lx_BuchungsblattBodenordnung, gruppiert nach LX_Verfahren
             let query_lx_onr = format!("
-                SELECT a.UUID, a.OSNR, a.OUNR, a.LX91003, c.UUID, d.UUID FROM {schema}.LX22003 a
+                SELECT a.UUID, a.OSNR, a.OUNR, a.KAN, a.BEG, a.LX91003, c.UUID, d.UUID FROM {schema}.LX22003 a
                 LEFT JOIN {schema}.A_LX22003_LX21007 b ON a.UUID = b.OFID
                 INNER JOIN {schema}.LX21007 c ON c.UUID = b.DFID
                 INNER JOIN {schema}.AX21007 d ON c.AX21007 = d.UUID
@@ -1207,7 +1211,7 @@ impl DhkVerbindung {
             let mut ordnungsnummer_map = BTreeMap::new();
             let mut grundbuchblatt_ordnungsnr_map = BTreeMap::new();
 
-            if let Ok(rr) = stmt.query_as::<(String, usize, usize, String, String, String)>(&[]) {
+            if let Ok(rr) = stmt.query_as::<(String, usize, usize, usize, DateTime<Local>, String, String, String)>(&[]) {
                 
                 let mut onr = BTreeMap::new();
 
@@ -1215,6 +1219,8 @@ impl DhkVerbindung {
                     uuid, 
                     stammnummer, 
                     unternummer, 
+                    kan,
+                    beg,
                     verfahren_uuid, 
                     lx_buchungsblatt_uuid, 
                     ax_buchungsblatt_uuid
@@ -1225,9 +1231,16 @@ impl DhkVerbindung {
                         None => continue,
                     };
 
+                    let kan = match KennzeichnungAlterNeuerBestand::from_usize(kan) {
+                        Some(s) => s,
+                        None => continue,
+                    };
+
+                    let beg = local_to_utc(beg);
+
                     onr.entry(verfahren_uuid)
                     .or_insert_with(|| BTreeMap::new())
-                    .entry((uuid, stammnummer, unternummer))
+                    .entry((uuid, stammnummer, unternummer, kan, beg))
                     .or_insert_with(|| Vec::new())
                     .push(BeteiligterLxBuchungsblattBodenordnung {
                         uuid: lx_buchungsblatt_uuid,
@@ -1246,7 +1259,7 @@ impl DhkVerbindung {
                 }
     
                 for (verfahren_uuid, onr_in_verfahren) in onr {
-                    for ((uuid, stammnummer, unternummer), ordnungsnummer_personen) in onr_in_verfahren {
+                    for ((uuid, stammnummer, unternummer, kan, beg), ordnungsnummer_personen) in onr_in_verfahren {
 
                         for onr_person in ordnungsnummer_personen.iter() {
                             grundbuchblatt_ordnungsnr_map
@@ -1254,6 +1267,8 @@ impl DhkVerbindung {
                             .or_insert_with(|| BTreeMap::new())
                             .entry(OrdnungsnummerBodenordnungKeinePerson {
                                 uuid: uuid.clone(), 
+                                kan: kan.clone(),
+                                beg: beg.clone(),
                                 stammnummer: stammnummer.clone(), 
                                 unternummer: unternummer.clone(), 
                             })
@@ -1266,6 +1281,8 @@ impl DhkVerbindung {
                         .or_insert_with(|| Vec::new())
                         .push(OrdnungsnummerBodenordnung {
                             uuid, 
+                            kan: kan.clone(),
+                            beg: beg.clone(),
                             stammnummer, 
                             unternummer, 
                             ordnungsnummer_personen,
@@ -1433,7 +1450,7 @@ impl DhkVerbindung {
             })?;
         
             let mut buchungsblatt_bodenordnung_map = BTreeMap::new();
-            if let Ok(rr) = stmt.query_as::<(String, DateTime<FixedOffset>, String, usize, usize, usize, String, usize, usize, usize, usize)>(&[]) {
+            if let Ok(rr) = stmt.query_as::<(String, DateTime<Local>, String, usize, usize, usize, String, usize, usize, usize, usize)>(&[]) {
 
                 let buchungsblatt_bodenordnung = rr
                 .into_iter()
@@ -1532,7 +1549,7 @@ impl DhkVerbindung {
 
             let mut abteilung2_rechte_in_schema_map = BTreeMap::new();
 
-            if let Ok(rr) = stmt.query_as::<(String, DateTime<FixedOffset>, Option<DateTime<FixedOffset>>, usize, String, String, DateTime<FixedOffset>)>(&[]) {
+            if let Ok(rr) = stmt.query_as::<(String, DateTime<Local>, Option<DateTime<Local>>, usize, String, String, DateTime<Local>)>(&[]) {
 
                 let abteilung2_rechte_in_schema = rr
                 .into_iter()
@@ -1578,7 +1595,7 @@ impl DhkVerbindung {
 
                         buchungsstellen.push(AxBuchungsstelle {
                             lx21004: buchungsstelle_belastet_uuid.clone(),
-                            lx21004_erstellt_am: lx21004_erstellt_am.into(),
+                            lx21004_erstellt_am: local_to_utc(lx21004_erstellt_am),
                             lfd_nr_grundbuch: lfd_nr,
                             lx21008: lx21008.clone(),
                             ax21008,
@@ -1588,7 +1605,7 @@ impl DhkVerbindung {
 
                     Ok((verfahren_uuid.clone(), LxAbteilung2 {
                         uuid,
-                        erstellt_am: erstellt_am.into(),
+                        erstellt_am: local_to_utc(erstellt_am),
                         ende,
                         lfd_nr,
                         buchungsstellen,
@@ -1610,7 +1627,7 @@ impl DhkVerbindung {
             // alle Abt 3. Rechte
             // lfd. Nr., textlicher Teil, RechteArt (Schuld), Aktionsstatus, Rangvermerk, eingetragen am, Verfahrens-UUID
             let query_abt3 = format!("
-                SELECT a.UUID, a.BEG, a.ENDE, a.LFD, a.LX91003, c.UUID, c.BEG
+                SELECT a.UUID, a.BEG, a.ENDE, a.LFD, a.LX91003, c.UUID, c.BEG, c.BEG
                 FROM {schema}.LX23002 a
                 INNER JOIN {schema}.A_LX23002_LX23004  b ON a.UUID = b.OFID
                 INNER JOIN {schema}.LX23004 c ON b.DFID = c.UUID
@@ -1622,7 +1639,7 @@ impl DhkVerbindung {
             })?;
 
             let mut abteilung3_rechte_in_schema_map = BTreeMap::<String, Vec<LxAbteilung3>>::new();
-            if let Ok(rr) = stmt.query_as::<(String, DateTime<FixedOffset>, Option<DateTime<FixedOffset>>, usize, String, String, DateTime<FixedOffset>)>(&[]) {
+            if let Ok(rr) = stmt.query_as::<(String, DateTime<Local>, Option<DateTime<Local>>, usize, String, String, DateTime<Local>, DateTime<Local>)>(&[]) {
 
                 let abteilung3_rechte_in_schema = rr
                 .into_iter()
@@ -1637,6 +1654,7 @@ impl DhkVerbindung {
                         verfahren_uuid,
                         buchungsstelle_belastet_uuid,
                         lx21004_erstellt_am,
+                        lx21004_erstellt_am_2,
                     ) = abt3;
                     
                     //  LX_21008
@@ -1664,10 +1682,9 @@ impl DhkVerbindung {
                                 continue;
                             },
                         };
-
                         buchungsstellen.push(AxBuchungsstelle {
                             lx21004: buchungsstelle_belastet_uuid.clone(),
-                            lx21004_erstellt_am: lx21004_erstellt_am.into(),
+                            lx21004_erstellt_am: local_to_utc(lx21004_erstellt_am),
                             lfd_nr_grundbuch: lfd_nr,
                             lx21008: lx21008.clone(),
                             ax21008,
@@ -1678,7 +1695,7 @@ impl DhkVerbindung {
                     Ok((verfahren_uuid.clone(), LxAbteilung3 {
                         uuid,
                         ende,
-                        erstellt_am: erstellt_am.into(),
+                        erstellt_am: local_to_utc(erstellt_am),
                         lfd_nr,
                         buchungsstellen,
                     }))
@@ -1767,8 +1784,19 @@ impl DhkVerbindung {
 
 // Due to problems with compiling TzSpecificLocalTimeToSystemTime
 // between 32-bit / 64-bit, do the conversion manually
-fn local_to_utc(input: DateTime<FixedOffset>) -> DateTime<Utc> {
-    input.into()
+fn local_to_utc(ts: DateTime<Local>) -> DateTime<Utc> {
+    
+    use chrono::NaiveDate;
+    use std::str::FromStr;
+
+    let ts = Timestamp::from_str(&ts.to_rfc3339())
+        .unwrap_or(Timestamp::new(0, 0, 0, 0, 0, 0, 0));
+    
+    let fixed = FixedOffset::east(ts.tz_offset())
+        .ymd(ts.year(), ts.month(), ts.day())
+        .and_hms_nano(ts.hour(), ts.minute(), ts.second(), ts.nanosecond());
+
+    fixed.into()
 }
 
 fn gehoert_zu_ordnungsnummern_ausfuellen(
