@@ -580,7 +580,7 @@ fn verfahren_auswaehlen(data: &mut RefAny, info: &mut CallbackInfo) -> Update {
 
 fn render_verfahren_info(app_data: RefAny, data: &AppData) -> Dom {
 
-    use crate::Auftragsstatus;
+    use crate::{wsdl::KennzeichnungAlterNeuerBestand, Auftragsstatus};
     use azul::widgets::*;
     use azul::image::{ImageRef, RawImage};
     use azul::option::OptionImageRef;
@@ -689,18 +689,27 @@ fn render_verfahren_info(app_data: RefAny, data: &AppData) -> Dom {
                     TabHeader::new(vec![
                         format!("Alle ({})", ausgewaehltes_verfahren.buchungsblatt_bodenordnung
                             .iter()
-                            .filter(|i| !i.nebenbeteiligten_blatt)
+                            .filter(|gb| !gb.nebenbeteiligten_blatt)
+                            .filter(|gb| !gb.gehoert_zu_ordnungsnummern.is_empty())
+                            .filter(|gb| gb.ax_buchungsblatt.blt == 1000)
+                            .filter(|gb| gb.kan == KennzeichnungAlterNeuerBestand::AlterBestand)
                             .count()
                         ),
                         format!("Abgeglichen ({})", ausgewaehltes_verfahren.buchungsblatt_bodenordnung
                             .iter()
-                            .filter(|i| !i.nebenbeteiligten_blatt)
+                            .filter(|gb| !gb.nebenbeteiligten_blatt)
+                            .filter(|gb| !gb.gehoert_zu_ordnungsnummern.is_empty())
+                            .filter(|gb| gb.ax_buchungsblatt.blt == 1000)
+                            .filter(|gb| gb.kan == KennzeichnungAlterNeuerBestand::AlterBestand)
                             .filter(|i| i.grundbuchvergleich_durchgefuehrt)
                             .count()
                         ),
                         format!("Nicht abgeglichen ({})", ausgewaehltes_verfahren.buchungsblatt_bodenordnung
                             .iter()
-                            .filter(|i| !i.nebenbeteiligten_blatt)
+                            .filter(|gb| !gb.nebenbeteiligten_blatt)
+                            .filter(|gb| !gb.gehoert_zu_ordnungsnummern.is_empty())
+                            .filter(|gb| gb.ax_buchungsblatt.blt == 1000)
+                            .filter(|gb| gb.kan == KennzeichnungAlterNeuerBestand::AlterBestand)
                             .filter(|i| !i.grundbuchvergleich_durchgefuehrt)
                             .count()
                         ),
@@ -718,10 +727,14 @@ fn render_verfahren_info(app_data: RefAny, data: &AppData) -> Dom {
                 format!("Abgeglichen"),
                 format!("Blatt"),
                 format!("Nr."),
+                format!("Ordnungsnummer(n)"),
             ].into())
             .with_rows(ausgewaehltes_verfahren.buchungsblatt_bodenordnung
                 .iter()
                 .filter(|gb| !gb.nebenbeteiligten_blatt)
+                .filter(|gb| !gb.gehoert_zu_ordnungsnummern.is_empty())
+                .filter(|gb| gb.ax_buchungsblatt.blt == 1000)
+                .filter(|gb| gb.kan == KennzeichnungAlterNeuerBestand::AlterBestand)
                 .filter(|gb| {
                     match ausgewaehltes_verfahren.ui.sub_tab {
                         1 => gb.grundbuchvergleich_durchgefuehrt,
@@ -740,6 +753,9 @@ fn render_verfahren_info(app_data: RefAny, data: &AppData) -> Dom {
                         .with_inline_css_props(CSS_MATCH_IMAGE),
                         p::render(gb.ax_buchungsblatt.bbb_name.clone().unwrap_or_default().into()),
                         p::render(format!("{}", gb.ax_buchungsblatt.bbn).into()),
+                        p::render(gb.gehoert_zu_ordnungsnummern.iter().map(|onr| {
+                            format!("{}/{:02}", onr.stammnummer, onr.unternummer)
+                        }).collect::<Vec<_>>().join(", ").into())
                     ].into(),
                     height: None.into(),
                 }).collect::<Vec<_>>().into())
@@ -2839,13 +2855,14 @@ fn get_verfahren_grundbuchhaken(verfahren: &VerfahrenGeladen, haken_setzen: bool
 
     for buchungsblatt in verfahren.buchungsblatt_bodenordnung.iter()
         .filter(|gb| !gb.nebenbeteiligten_blatt)
+        .filter(|gb| !gb.gehoert_zu_ordnungsnummern.is_empty())
         .filter(|gb| gb.ax_buchungsblatt.blt == 1000)
+        .filter(|gb| gb.kan == KennzeichnungAlterNeuerBestand::AlterBestand)
         .filter(|gb| if haken_setzen {
             !gb.grundbuchvergleich_durchgefuehrt
         } else {
             gb.grundbuchvergleich_durchgefuehrt
-        })
-        .filter(|gb| gb.kan == KennzeichnungAlterNeuerBestand::AlterBestand) {
+        }) {
 
         xml.push_str(&format!("
             <wfsext:Replace vendorId=\"AdV\" safeToIgnore=\"false\">
