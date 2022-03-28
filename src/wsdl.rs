@@ -1201,7 +1201,7 @@ pub struct FfaLxOrdnungsNummer {
 	pub lx_namensnummer_uuid: String,
 }
 
-#[derive(Debug, Copy, Clone, PartialEq, Eq, Ord, PartialOrd, Serialize, Deserialize)]
+#[derive(Debug, Hash, Copy, Clone, PartialEq, Eq, Ord, PartialOrd, Serialize, Deserialize)]
 pub enum Anrede {
 	Herr,
 	Frau,

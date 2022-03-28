@@ -1,4 +1,5 @@
-// #![windows_subsystem = "windows"]
+#![windows_subsystem = "windows"]
+#![allow(warnings)]
 
 use std::path::Path;
 use oracle::{StmtParam, sql_type::Timestamp};
@@ -27,6 +28,7 @@ pub mod wsdl;
 #[derive(Default)]
 pub struct AppData {
     verfahren_filter: Option<String>,
+    fehlenden_flurstuecke_anzeigen: bool,
     konfiguration: LefisUploadKonfiguration,
     lefis_info: Option<LefisInfo>,
     dhk_verbindung: Option<DhkVerbindung>,
@@ -37,6 +39,7 @@ pub struct AppData {
 #[derive(Default, Clone, Debug)]
 pub struct GeladeneVerfahren {
     pub verfahren: Vec<VerfahrenGeladen>,
+    pub ax_anschriften: BTreeMap<String, AxAnschrift>,
     pub flurstuecke_ohne_verfahren: Vec<AxFlurstueckOhneVerfahren>,
 }
 
@@ -154,7 +157,7 @@ pub struct DhkVerbindung {
     pub zugangsdaten: OracleDbParameter,
 }
 
-#[derive(Debug, Clone, PartialEq)]
+#[derive(Debug, Clone)]
 pub struct VerfahrenGeladen {
     pub ui: UiState,
     pub nummer: usize,
@@ -220,6 +223,21 @@ pub struct LxPerson {
 }
 
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
+pub struct AxAnschrift {
+    pub uuid: String,
+    pub beg: DateTime<Utc>,
+    pub ortsname_postalisch: String,
+    pub ortsname_amtlich: Option<String>,
+    pub postleitzahl: Option<String>,
+    pub bestimmungsland: Option<String>,
+    pub ortsteil: Option<String>,
+    pub strasse: Option<String>,
+    pub hausnummer: Option<String>,
+    pub postfach_nr: Option<String>,
+    pub postfach_postleitzahl: Option<String>,
+}
+
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
 pub struct AxPerson {
     pub uuid: String,
     pub beg: DateTime<Utc>,
@@ -231,6 +249,7 @@ pub struct AxPerson {
     pub nachname_oder_firma: String,
     pub geburtsname: Option<String>,
     pub wohnort: Option<String>,
+    pub anschriften: Vec<AxAnschrift>,
 }
 
 // LX22004
@@ -469,7 +488,7 @@ pub struct AxBestehendeBuchungsstelle {
     pub kan: KennzeichnungAlterNeuerBestand,
 }
 
-#[derive(Debug, PartialEq, Clone, Serialize, Deserialize)]
+#[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct LefisDatei {
     pub titelblatt: Titelblatt,
     pub rechte: GrundbuchAnalysiert,
@@ -479,17 +498,48 @@ pub struct LefisDatei {
 pub struct Titelblatt {
     pub amtsgericht: String,
     pub grundbuch_von: String,
-    pub blatt: usize,
+    pub blatt: u64,
 }
 
-#[derive(Debug, PartialEq, Clone, Serialize, Deserialize)]
+#[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct GrundbuchAnalysiert {
     pub abt2: Vec<Abt2Analysiert>,
     pub abt3: Vec<Abt3Analysiert>,
 }
 
-#[derive(Debug, Clone, PartialEq, PartialOrd, Ord, Eq, Serialize, Deserialize)]
-pub struct BvEintrag {
+#[derive(Debug, Clone, PartialEq, PartialOrd, Serialize, Deserialize)]
+#[serde(untagged)]
+pub enum BvEintrag {
+    Flurstueck(BvEintragFlurstueck),
+    Recht(BvEintragRecht),
+}
+
+impl BvEintrag {
+    pub fn as_flurstueck(&self) -> Option<&BvEintragFlurstueck> {
+        match self {
+            BvEintrag::Flurstueck(f) => Some(f),
+            _ => None,
+        }
+    }
+}
+
+// Eintrag für ein grundstücksgleiches Recht
+#[derive(Debug, Clone, PartialEq, PartialOrd, Serialize, Deserialize)]
+pub struct BvEintragRecht {
+    pub lfd_nr: usize,
+    pub zu_nr: String,
+    pub bisherige_lfd_nr: Option<usize>,
+    pub text: String,
+    #[serde(default)]
+    pub automatisch_geroetet: Option<bool>,
+    #[serde(default)]
+    pub manuell_geroetet: Option<bool>,
+    #[serde(default)]
+    pub position_in_pdf: Option<PositionInPdf>,
+}
+
+#[derive(Debug, Clone, PartialEq, PartialOrd, Serialize, Deserialize)]
+pub struct BvEintragFlurstueck {
     pub lfd_nr: usize,
     pub bisherige_lfd_nr: Option<usize>,
     pub flur: usize,
@@ -499,9 +549,25 @@ pub struct BvEintrag {
     pub bezeichnung: Option<String>,
     pub groesse: FlurstueckGroesse,
     #[serde(default)]
-    pub automatisch_geroetet: bool,
+    pub automatisch_geroetet: Option<bool>,
     #[serde(default)]
     pub manuell_geroetet: Option<bool>,
+    #[serde(default)]
+    pub position_in_pdf: Option<PositionInPdf>,
+}
+
+#[derive(Debug, Default, Clone, PartialOrd, PartialEq, Serialize, Deserialize)]
+pub struct PositionInPdf {
+    pub seite: u32,
+    pub rect: OptRect,
+}
+
+#[derive(Debug, Default, Clone, PartialOrd, PartialEq, Serialize, Deserialize)]
+pub struct OptRect {
+    pub min_x: Option<f32>,
+    pub max_x: Option<f32>,
+    pub min_y: Option<f32>,
+    pub max_y: Option<f32>,
 }
 
 #[derive(Debug, Clone, PartialEq, PartialOrd, Ord, Eq, Serialize, Deserialize)]
@@ -509,13 +575,13 @@ pub struct BvEintrag {
 pub enum FlurstueckGroesse {
     #[serde(rename = "m")]
     Metrisch { 
-        m2: Option<usize>
+        m2: Option<u64>
     },
     #[serde(rename = "ha")]
     Hektar { 
-        ha: Option<usize>, 
-        a: Option<usize>, 
-        m2: Option<usize>,
+        ha: Option<u64>, 
+        a: Option<u64>, 
+        m2: Option<u64>,
     }
 }
 
@@ -725,13 +791,30 @@ impl RechteArt {
     }
 }
 
-#[derive(Debug, PartialEq, Clone, Serialize, Deserialize)]
+#[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct Abt2Analysiert {
     pub lfd_nr: usize,
     pub text_kurz: String,
     pub rechteart: RechteArt,
     pub rechtsinhaber: String,
     pub rangvermerk: Option<String>,
+    pub spalte_2: String,
+    // Flur, Flurstück
+    pub belastete_flurstuecke: Vec<BvEintrag>,
+    pub text_original: String,
+    pub nebenbeteiligter: Nebenbeteiligter,
+    pub warnungen: Vec<String>,
+    pub fehler: Vec<String>,
+}
+
+
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct Abt3Analysiert {
+    pub lfd_nr: usize,
+    pub text_kurz: String,
+    pub betrag: Betrag,
+    pub schuldenart: SchuldenArt,
+    pub rechtsinhaber: String,
     pub spalte_2: String,
     // Flur, Flurstück
     pub belastete_flurstuecke: Vec<BvEintrag>,
@@ -823,22 +906,6 @@ impl SchuldenArt {
     }
 }
 
-#[derive(Debug, PartialEq, Clone, Serialize, Deserialize)]
-pub struct Abt3Analysiert {
-    pub lfd_nr: usize,
-    pub text_kurz: String,
-    pub betrag: Betrag,
-    pub schuldenart: SchuldenArt,
-    pub rechtsinhaber: String,
-    pub spalte_2: String,
-    // Flur, Flurstück
-    pub belastete_flurstuecke: Vec<BvEintrag>,
-    pub text_original: String,
-    pub nebenbeteiligter: Nebenbeteiligter,
-    pub warnungen: Vec<String>,
-    pub fehler: Vec<String>,
-}
-
 #[derive(Debug, Copy, Clone, PartialEq, PartialOrd, Hash, Serialize, Deserialize)]
 pub enum Waehrung { 
     Euro,
@@ -872,21 +939,20 @@ pub struct Betrag {
     pub waehrung: Waehrung,
 }
 
-#[derive(Default, Debug, Clone, PartialEq, Eq, Ord, PartialOrd, Serialize, Deserialize)]
+#[derive(Default, Debug, Clone, PartialEq, Eq, PartialOrd, Ord, Hash, Serialize, Deserialize)]
 pub struct Nebenbeteiligter {
     // ONr., falls bereits vergeben
     pub ordnungsnummer: Option<usize>,
     // Typ des NB, wichtig für ONr.
     pub typ: Option<NebenbeteiligterTyp>,
-    // Name des NB im Grundbuch
+    // Name des NB
     pub name: String,
-    // Informationen für das Anlegen der Ordnungsnummer 
-    // (wird 1:1 in LEFIS übernommen)
     #[serde(default)]
     pub extra: NebenbeteiligterExtra,
 }
 
-#[derive(Default, Debug, Clone, PartialEq, Eq, Ord, PartialOrd, Serialize, Deserialize)]
+// Extra Informationen, wird 1:1 in LEFIS übernommen
+#[derive(Default, Debug, Clone, PartialEq, Eq, Ord, PartialOrd, Hash, Serialize, Deserialize)]
 pub struct NebenbeteiligterExtra {
     pub anrede: Option<Anrede>,
     pub titel: Option<String>,
@@ -897,7 +963,7 @@ pub struct NebenbeteiligterExtra {
     pub wohnort: Option<String>,
 }
 
-#[derive(Debug, Clone, PartialEq, Eq, Ord, PartialOrd, Serialize, Deserialize)]
+#[derive(Debug, Clone, PartialEq, Eq, Copy, PartialOrd, Ord, Hash, Serialize, Deserialize)]
 pub enum NebenbeteiligterTyp {
     #[serde(rename="OEFFENTLICH")]
     Oeffentlich,
@@ -1040,11 +1106,89 @@ impl DhkVerbindung {
         verfahren_tabellen.dedup();
 
         let mut verfahren = Vec::new();
-
         let mut flurstuecke_ohne_verfahren = Vec::new();
+        let mut ax_anschriften = BTreeMap::new();
 
         for schema in verfahren_tabellen {
 
+            // alle Anschriften in der Datenbank
+            let query_adressen = format!("SELECT UUID, BEG, ORP, PLZ, PZP, BLA, OTT, STR, HSN, ORA, PFH FROM {schema}.AX21003");
+
+            let mut stmt = self.conn.prepare(&query_adressen, &[StmtParam::FetchArraySize(10000)])
+            .map_err(|e| {
+                format!("FEHLER in conn.prepare(\"{}\"): {}", query_adressen, e)
+            })?;
+
+            if let Ok(rr) = stmt.query_as::<(
+                String,
+                DateTime<Local>, 
+                String, 
+                Option<String>, 
+                Option<String>, 
+                Option<String>,
+                Option<String>,
+                Option<String>,
+                Option<String>,
+                Option<String>,
+                Option<String>,
+            )>(&[]) {
+
+                let anschriften_in_schema = rr
+                .into_iter()
+                .filter_map(|o| o.ok())
+                .map(|anschrift| {
+
+                    let (
+                        uuid, 
+                        beg,
+                        orp,
+                        plz,
+                        pzp, 
+                        bla,
+                        ott,
+                        stra,
+                        hsn,
+                        ora,
+                        pfh,
+                    ) = anschrift;
+
+                    Ok((uuid.clone(), AxAnschrift {
+                        uuid,
+                        beg: local_to_utc(beg),
+                        ortsname_postalisch: orp,
+                        ortsname_amtlich: ora,
+                        postleitzahl: plz,
+                        bestimmungsland: bla,
+                        ortsteil: ott,
+                        strasse: stra,
+                        hausnummer: hsn,
+                        postfach_nr: pfh,
+                        postfach_postleitzahl: pzp,
+                    }))
+                }).collect::<Result<Vec<_>, oracle::Error>>()
+                .map_err(|e| {
+                    format!("FEHLER in conn.query(\"{}\"): {}", query_adressen, e)
+                })?;
+
+                ax_anschriften.extend(anschriften_in_schema.into_iter());
+            }
+
+            // AX_Person => AX_Anschrift
+            let mut ax_person_ax_anschrift_map = BTreeMap::new();
+            let query_ax_person_ax_anschrift_map = format!("SELECT OFID, DFID FROM {schema}.A_AX21001_AX21003");
+            // OFID = AX_Person
+            // DFID = AX_Anschrift
+            if let Ok(rr) = stmt.query_as::<(String, String)>(&[]) {
+                for (ax_person_uuid, ax_anschrift_uuid) in rr.into_iter().filter_map(|o| o.ok()) {
+                    if let Some(ax_adresse) = ax_anschriften.get(&ax_anschrift_uuid) {
+                        ax_person_ax_anschrift_map
+                        .entry(ax_person_uuid)
+                        .or_insert_with(|| Vec::new())
+                        .push(ax_adresse.clone());
+                    }
+                }
+            }
+                
             // Lade alle LX_Person / AxPerson aus dem Verfahren
             let query_lx_person = format!("
                 SELECT a.UUID, a.BEG, a.LX91003, b.UUID, b.BEG, b.ANR, b.VNA, b.NBA, b.AKD, b.GNA, b.GEB, b.WOS, b.BER, b.SOS, b.HLG, b.NOF FROM {schema}.LX21001 a 
@@ -1108,7 +1252,7 @@ impl DhkVerbindung {
                         uuid,
                         beg: local_to_utc(beg),
                         ax_person: AxPerson {
-                            uuid: ax_uuid,
+                            uuid: ax_uuid.clone(),
                             beg: local_to_utc(ax_beg),
                             anrede: ax_anrede,
                             titel: ax_nba,
@@ -1116,6 +1260,7 @@ impl DhkVerbindung {
                             nachname_oder_firma: ax_nachname,
                             geburtsname: ax_geburtsname,
                             wohnort: ax_wohnort,
+                            anschriften: ax_person_ax_anschrift_map.get(&ax_uuid).cloned().unwrap_or_default(),
                         }
                     })
                 }
@@ -1778,6 +1923,7 @@ impl DhkVerbindung {
         Ok(GeladeneVerfahren {
             verfahren,
             flurstuecke_ohne_verfahren,
+            ax_anschriften,
         })
     }
 }
@@ -1786,7 +1932,6 @@ impl DhkVerbindung {
 // between 32-bit / 64-bit, do the conversion manually
 fn local_to_utc(ts: DateTime<Local>) -> DateTime<Utc> {
     
-    use chrono::NaiveDate;
     use std::str::FromStr;
 
     let ts = Timestamp::from_str(&ts.to_rfc3339())
@@ -1875,6 +2020,7 @@ fn main() {
 
     let mut app = App::new(RefAny::new(AppData {
         verfahren_filter: None,
+        fehlenden_flurstuecke_anzeigen: false,
         konfiguration,
         lefis_info: db,
         dhk_verbindung,

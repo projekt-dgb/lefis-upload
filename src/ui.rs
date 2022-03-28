@@ -4,9 +4,10 @@
 use azul::widgets::{FileInput, TabHeaderState, FileInputState, CheckBoxState, TextInputState, NumberInputState};
 use azul::task::{ThreadSender, ThreadReceiver};
 use azul::vec::U8Vec;
-use crate::{LefisUploadKonfiguration, exec_sync};
+use crate::{Nebenbeteiligter, LefisUploadKonfiguration, exec_sync};
 use crate::wsdl::{ProtokollMsg, AuftragsManager, RequestFailure};
 use crate::GeladeneVerfahren;
+use std::fmt;
 
 const IMG_DONE: &[u8] = include_bytes!("../img/icons8-done-48.png");
 const IMG_CLOSE: &[u8] = include_bytes!("../img/icons8-close-48.png");
@@ -670,7 +671,10 @@ fn render_verfahren_info(app_data: RefAny, data: &AppData) -> Dom {
             TabHeader::new(vec![
                 format!("Grundbuchblätter ({})", ausgewaehltes_verfahren.buchungsblatt_bodenordnung
                         .iter()
-                        .filter(|i| !i.nebenbeteiligten_blatt)
+                        .filter(|gb| !gb.nebenbeteiligten_blatt)
+                        .filter(|gb| !gb.gehoert_zu_ordnungsnummern.is_empty())
+                        .filter(|gb| gb.ax_buchungsblatt.blt == 1000)
+                        .filter(|gb| gb.kan == KennzeichnungAlterNeuerBestand::AlterBestand)
                         .count()
                     ),
                 format!("Flurstücke ({})", ausgewaehltes_verfahren.flurstuecke.len()),
@@ -845,20 +849,56 @@ fn render_verfahren_info(app_data: RefAny, data: &AppData) -> Dom {
                         .with_inline_style("padding: 5px;".into())
                         .with_child(
                             div::render()
-                            .with_inline_style("flex-grow: 1;flex-direction:row;".into())
+                            .with_inline_style("flex-grow: 1;flex-direction:row; color: #999900; background: #FFFFE0;".into())
                             .with_children(if warnungen.len() > 1 {
-                                    vec![
-                                    p::render(format!("Warnung: {} - und {} weitere Fehler", s, warnungen.len() - 1).into())
-                                    .with_inline_style("flex-grow:1;font-size: 12px; color: #999900; background: #FFFFE0;".into()),
+                                vec![
+                                    div::render()
+                                    .with_inline_style("
+                                        display:flex;
+                                        flex-grow:1;
+                                        flex-direction:column;
+                                        align-items:flex-end;
+                                        justify-content:flex-end;
+                                    ".into())
+                                    .with_children(vec![
+                                        p::render(format!("Warnung: {} - und {} weitere Fehler", s, warnungen.len() - 1).into())
+                                        .with_inline_style("flex-grow:1;font-size: 12px;".into()),
+                                        div::render()
+                                        .with_inline_style("flex-direction:row;".into())
+                                        .with_children(vec![
+                                            CheckBox::new(data.fehlenden_flurstuecke_anzeigen)
+                                            .with_on_toggle(app_data.clone(), toggle_fehler_filtern)
+                                            .dom(),
+                                            p::render("Fehler bzgl. fehlenden Flurstücken ausblenden".into())
+                                            .with_inline_style("flex-grow:1;font-size: 12px;margin-left:5px;".into()),
+                                        ].into())
+                                    ].into()),
                                     div::render()
                                     .with_inline_style("display:flex;flex-grow:0;align-items:flex-end;justify-content:flex-end;".into())
-                                    .with_child(
-                                        Button::new("Anzeigen".into())
-                                        .with_on_click(RefAny::new(WarnungDialog {
+                                    .with_children(vec![
+                                        FileInput::new(None.into())
+                                        .with_default_text("Fehlende Flurstücke ausgeben".into())
+                                        .with_on_path_change(RefAny::new(WarnungDialog {
                                             warnungen: warnungen.clone(),
+                                        }), fehlende_flurstuecke_ausgeben)
+                                        .dom()
+                                        .with_inline_style("margin-bottom: 5px".into()),
+                                        Button::new("Fehler anzeigen".into())
+                                        .with_on_click(RefAny::new(WarnungDialog {
+                                            warnungen: if data.fehlenden_flurstuecke_anzeigen {
+                                                warnungen
+                                                .iter()
+                                                .filter_map(|w| match w {
+                                                    FfaWarnung::FlurstueckNichtGefunden { .. } => None,
+                                                    o => Some(o.clone()),
+                                                })
+                                                .collect()
+                                            } else {
+                                                warnungen.clone() 
+                                            },
                                         }), zeige_warnungen)
                                         .dom()
-                                    )
+                                    ].into())
                                 ]
                             } else {
                                 vec![
@@ -991,6 +1031,18 @@ fn render_verfahren_info(app_data: RefAny, data: &AppData) -> Dom {
     ]))
 }
 
+extern "C"
+fn toggle_fehler_filtern(data: &mut RefAny, _info: &mut CallbackInfo, ci: &CheckBoxState) -> Update {
+
+    let mut data = match data.downcast_mut::<AppData>() {
+        Some(s) => s,
+        None => return Update::DoNothing,
+    };
+    let data = &mut *data;
+    data.fehlenden_flurstuecke_anzeigen = ci.checked;
+    Update::RefreshDom
+}
+
 struct ProtokollDataset {
     log: Vec<ProtokollMsg>,
 }
@@ -1023,7 +1075,45 @@ fn protokoll_speichern_unter(data: &mut RefAny, _info: &mut CallbackInfo, fi: &F
 }
 
 struct WarnungDialog {
-    warnungen: Vec<String>,
+    warnungen: Vec<FfaWarnung>,
+}
+
+extern "C"
+fn fehlende_flurstuecke_ausgeben(data: &mut RefAny, _info: &mut CallbackInfo, fi: &FileInputState) -> Update {
+    
+    use azul::dialog::MsgBox;
+
+    let data = match data.downcast_ref::<WarnungDialog>() {
+        Some(s) => s,
+        None => { return Update::DoNothing; },
+    };
+
+    let mut datei_pfad = match fi.path.as_ref() {
+        Some(s) => s.as_str().to_string(),
+        None => return Update::DoNothing,
+    };
+
+    if !datei_pfad.ends_with(".tsv") {
+        datei_pfad = format!("{datei_pfad}.tsv");
+    }
+    let mut s = format!("GEMARKUNG\tFLUR\tFLURSTUECK\tRECHT\r\n");
+    for warnung in data.warnungen.iter() {
+        if let FfaWarnung::FlurstueckNichtGefunden { gemarkung, flur, flurstueck, benoetigt_von } = warnung {
+            let first_benoetigt_von = match benoetigt_von.first() {
+                Some(s) => s,
+                None => continue,
+            };
+            s.push_str(&format!("{gemarkung}\t{flur}\t{flurstueck}\t{first_benoetigt_von}\r\n"));
+            for benoetigt_von in benoetigt_von.iter().skip(1) {
+                s.push_str(&format!("\t\t\t{benoetigt_von}\r\n"));
+            }
+            s.push_str("\t\t\t\r\n");
+        }
+    }
+
+    let _ = std::fs::write(&datei_pfad, s.as_bytes());
+
+    Update::RefreshDom
 }
 
 extern "C"
@@ -1036,7 +1126,14 @@ fn zeige_warnungen(data: &mut RefAny, _info: &mut CallbackInfo) -> Update {
         None => { return Update::DoNothing; },
     };
 
-    let _ = MsgBox::info(data.warnungen.clone().join("\r\n\r\n").into());
+    let _ = MsgBox::info(
+            data.warnungen
+            .iter()
+            .map(|s| format!("{}", s))
+            .collect::<Vec<_>>()
+            .join("\r\n")
+            .into()
+        );
 
     Update::DoNothing
 }
@@ -1460,11 +1557,192 @@ extern "C" fn ffa_background_thread(
     }));
 }
 
+#[derive(Debug, Clone, PartialEq, Eq, PartialOrd, Ord, Hash)]
+pub enum FfaWarnung {
+    // "Konnte Grundbuchbezirks-ID für {:?} nicht finden", grundbuchblatt.titelblatt.grundbuch_von
+    GrundbuchBlattBezirkNichtGefunden { 
+        blatt: String 
+    },
+    // "{} Blatt {} gehört nicht zu Verfahren"
+    GehoertNichtZuVerfahren { 
+        blatt: String, 
+        nr: u64 
+    },
+    // Unlesbares Flurstückskennzeichen
+    UnlesbaresFlurstueckskennzeichenAbt2 { 
+        blatt: String, 
+        nr: u64, 
+        kennzeichen: String 
+    },
+    GemarkungsIdNichtGefunden { 
+        bezirk: String 
+    },
+    UnlesbarerNennerAbt2 {
+        blatt: String,
+        nr: u64,
+        lfd_nr: u64,
+        kennzeichen: String,
+    },
+    FalscheLfdNrAbt2 {
+        blatt: String,
+        nr: u64,
+        lfd_nr: u64,
+        lfd_nr_gefunden: Vec<usize>,
+        lfd_nr_erwartet: u64,
+        lx_21008: String, 
+    },
+    KeineBelastbarenFlurstueckeAbt2 {
+        blatt: String,
+        nr: u64,
+        lfd_nr: u64,
+    },
+    FalscheLfdNrAbt3 {
+        blatt: String,
+        nr: u64,
+        lfd_nr: u64,
+        lfd_nr_gefunden: Vec<usize>,
+        lfd_nr_erwartet: u64,
+        lx_21008: String, 
+    },
+    UnlesbaresFlurstueckskennzeichenAbt3 { 
+        blatt: String, 
+        nr: u64, 
+        kennzeichen: String 
+    },
+    UnlesbarerNennerAbt3 {
+        blatt: String,
+        nr: u64,
+        lfd_nr: u64,
+        kennzeichen: String,
+    },
+    KeineBelastbarenFlurstueckeAbt3 {
+        blatt: String,
+        nr: u64,
+        lfd_nr: u64,
+    },
+    MehrAlsEineGbBuchungsstelleAbt2 {
+        blatt: String,
+        nr: u64,
+        lfd_nr: u64,
+    },
+    MehrAlsEineGbBuchungsstelleAbt3 {
+        blatt: String,
+        nr: u64,
+        lfd_nr: u64,
+    },
+    MehrAlsEinNebenbeteiligterFuerOrdnungsnummer {
+        onr: u64,
+        nb_pro_onr: Vec<(Nebenbeteiligter, (usize, usize))>,
+    },
+    KeinNebenbeteiligter {
+        onr: u64,
+    },
+    MehrAlsEineNamensnummer {
+        onr: u64,
+        namensnummern_fuer_ordnungsnummer: Vec<String>,
+    },
+    KeinePersonRolle {
+        onr: u64,
+        namensnummern_fuer_ordnungsnummer: Vec<String>,
+    },
+    KeinePerson {
+        onr: u64,
+        person_rolle: String,
+    },
+    KeineOrdnungsnummerBodenordnung {
+        onr: u64,
+    },
+    RechtHatKeineRechtsinhaberInsert {
+        desc: String,
+    },
+    RechtHatKeineRechtsinhaberReplace {
+        desc: String,
+    },
+    FlurstueckNichtGefunden {
+        gemarkung: String,
+        flur: u64,
+        flurstueck: String,
+        benoetigt_von: Vec<String>,
+    },
+}
+
+impl fmt::Display for FfaWarnung {
+    fn fmt(&self, f: &mut fmt::Formatter) -> fmt::Result {
+        use self::FfaWarnung::*;
+        match self {
+            GrundbuchBlattBezirkNichtGefunden { blatt } => write!(f, "Konnte Grundbuchblatt-Bezirk für {blatt} nicht finden"),
+            GehoertNichtZuVerfahren { blatt, nr } => write!(f, "{blatt} Nr. {nr} gehört nicht zu Verfahren"),
+            UnlesbaresFlurstueckskennzeichenAbt2 { blatt, nr, kennzeichen } => {
+                write!(f, "{blatt} Nr. {nr} Abt. 2: Unlesbares Flurstückskennzeichen \"{kennzeichen}\"")
+            },
+            GemarkungsIdNichtGefunden { bezirk } => write!(f, "Gemarkungs-ID für {bezirk} nicht gefunden"),
+            UnlesbarerNennerAbt2 { blatt, nr, lfd_nr, kennzeichen } => {
+                write!(f, "{blatt} Nr. {nr} Abt. 2 lfd. Nr. {lfd_nr}: Unlesbarer Nenner in Flst.-Kennzeichen: {kennzeichen}")
+            },
+            FalscheLfdNrAbt2 { blatt, nr, lfd_nr, lfd_nr_gefunden, lfd_nr_erwartet, lx_21008 } => {
+                write!(f, "{blatt} Nr. {nr} Abt. 2 lfd. Nr. {lfd_nr}: Flurstück unter falscher lfd. Nr. gefunden (gefunden = {lfd_nr_gefunden:?}, erwartet = {lfd_nr_erwartet}) für Flurstück {lx_21008}")
+            },
+            KeineBelastbarenFlurstueckeAbt2 { blatt, nr, lfd_nr } => {
+                write!(f, "{blatt} Nr. {nr} Abt. 2 lfd. Nr. {lfd_nr}: Keine belastbaren Flurstücke gefunden")
+            },
+            FalscheLfdNrAbt3 { blatt, nr, lfd_nr, lfd_nr_gefunden, lfd_nr_erwartet, lx_21008 } => {
+                write!(f, "{blatt} Nr. {nr} Abt. 3 lfd. Nr. {lfd_nr}: Flurstück unter falscher lfd. Nr. gefunden (gefunden = {lfd_nr_gefunden:?}, erwartet = {lfd_nr_erwartet}) für Flurstück {lx_21008}")
+            },
+            UnlesbaresFlurstueckskennzeichenAbt3 { blatt, nr, kennzeichen } => {
+                write!(f, "{blatt} Nr. {nr} Abt. 3: Unlesbares Flurstückskennzeichen \"{kennzeichen}\"")
+            },
+            UnlesbarerNennerAbt3 { blatt, nr, lfd_nr, kennzeichen } => {
+                write!(f, "{blatt} Nr. {nr} Abt. 3 lfd. Nr. {lfd_nr}: Unlesbarer Nenner in Flst.-Kennzeichen: {kennzeichen}")
+            },
+            KeineBelastbarenFlurstueckeAbt3 { blatt, nr, lfd_nr } => {
+                write!(f, "{blatt} Nr. {nr} Abt. 3 lfd. Nr. {lfd_nr}: Keine belastbaren Flurstücke gefunden")
+            },
+            MehrAlsEineGbBuchungsstelleAbt2 { blatt, nr, lfd_nr } => {
+                write!(f, "{blatt} Nr. {nr} Abt. 2 lfd. Nr {lfd_nr}: Mehr als eine GB-Blatt Buchungsstelle")
+            },
+            MehrAlsEineGbBuchungsstelleAbt3 { blatt, nr, lfd_nr } => {
+                write!(f, "{blatt} Nr. {nr} Abt. 3 lfd. Nr {lfd_nr}: Mehr als eine GB-Blatt Buchungsstelle")
+            },
+            MehrAlsEinNebenbeteiligterFuerOrdnungsnummer { onr, nb_pro_onr } => {
+                write!(f, "Ordnungsnummer {onr}/00: Mehr als ein Nebenbeteiligter: {nb_pro_onr:?}")
+            },
+            KeinNebenbeteiligter { onr } => {
+                write!(f, "Ordnungsnummer {onr}/00: Existierende Ordnungsnummer ist kein Nebenbeteiligter")
+            }
+            MehrAlsEineNamensnummer { onr, namensnummern_fuer_ordnungsnummer } => {
+                write!(f, "Ordnungsnummer {onr}/00: Mehrere Namensnummern: {namensnummern_fuer_ordnungsnummer:?}")
+            },
+            KeinePersonRolle { onr, namensnummern_fuer_ordnungsnummer } => {
+                write!(f, "Ordnungsnummer {onr}/00: Keine LX_PersonRolle: {namensnummern_fuer_ordnungsnummer:?}")
+            },
+            KeinePerson { onr, person_rolle } => {
+                write!(f, "Ordnungsnummer {onr}/00: Keine LX_Person für LX_PersonRolle {person_rolle}")
+            },
+            KeineOrdnungsnummerBodenordnung { onr } => {
+                write!(f, "Ordnungsnummer {onr}/00: Keine OrdnungsnummerBodenOrdnung gefunden")
+            }
+            RechtHatKeineRechtsinhaberInsert { desc } => {
+                write!(f, "Insert: Recht hat keine Rechtsinhaber: {desc}")
+            }
+            RechtHatKeineRechtsinhaberReplace { desc } => {
+                write!(f, "Replace: Recht hat keine Rechtsinhaber: {desc}")
+            },
+            FlurstueckNichtGefunden { gemarkung, flur, flurstueck, benoetigt_von } => {
+                write!(f, "Gemarkung {gemarkung} Flur {flur} Flst. {flurstueck} nicht gefunden\r\n")?;
+                for b in benoetigt_von.iter() {
+                    write!(f, "\tbenötigt von {b}\r\n")?;
+                }
+                Ok(())
+            },
+        }
+    }
+}
+
 fn generiere_ffa(
     geladene_verfahren: &GeladeneVerfahren,
     aktives_verfahren: &str,
     lefis_geladen: &[LefisDatei], 
-    warnungen: &mut Vec<String>
+    warnungen: &mut Vec<FfaWarnung>
 ) -> FortfuehrungsAuftrag {
 
     use crate::wsdl::{
@@ -1518,16 +1796,18 @@ fn generiere_ffa(
 
     for grundbuchblatt in lefis_geladen.iter() {
 
-        let grundbuch_name = format!("{} Blatt {}", grundbuchblatt.titelblatt.grundbuch_von, grundbuchblatt.titelblatt.blatt);
-
         let mut delete = Vec::new();
         let mut insert = Vec::new();
         let mut replace = Vec::new();
 
+        let grundbuch_name = format!("{} Blatt {}", grundbuchblatt.titelblatt.grundbuch_von, grundbuchblatt.titelblatt.blatt);
+
         let buchungsblattbezirke = match verfahren.buchungsblattbezirke.get(&grundbuchblatt.titelblatt.grundbuch_von) {
             Some(s) => s.clone(),
             None => {
-                warnungen.push(format!("Konnte Grundbuchbezirks-ID für {:?} nicht finden", grundbuchblatt.titelblatt.grundbuch_von));
+                warnungen.push(FfaWarnung::GrundbuchBlattBezirkNichtGefunden {
+                    blatt: grundbuchblatt.titelblatt.grundbuch_von.clone(), 
+                });
                 continue;
             }
         };
@@ -1537,7 +1817,7 @@ fn generiere_ffa(
             match verfahren.buchungsblatt_bodenordnung.iter().find(|lx_buchungsblatt_bodenordnung| {
                 lx_buchungsblatt_bodenordnung.ax_buchungsblatt.lan16 == bb.lan16 &&
                 lx_buchungsblatt_bodenordnung.ax_buchungsblatt.bbb == bb.bbb &&
-                lx_buchungsblatt_bodenordnung.ax_buchungsblatt.bbn == grundbuchblatt.titelblatt.blatt
+                lx_buchungsblatt_bodenordnung.ax_buchungsblatt.bbn as u64 == grundbuchblatt.titelblatt.blatt
             }) {
                 Some(s) => { gbb_vorhanden = Some(s.clone()); break; },
                 None => { },
@@ -1547,11 +1827,10 @@ fn generiere_ffa(
         let gbb_vorhanden = match gbb_vorhanden {
             Some(s) => s,
             None => {
-                warnungen.push(format!(
-                    "{} Blatt {} gehört nicht zu Verfahren", 
-                    grundbuchblatt.titelblatt.grundbuch_von,
-                    grundbuchblatt.titelblatt.blatt,
-                ));
+                warnungen.push(FfaWarnung::GehoertNichtZuVerfahren {
+                    blatt: grundbuchblatt.titelblatt.grundbuch_von.clone(),
+                    nr: grundbuchblatt.titelblatt.blatt 
+                });
                 continue;
             }
         };
@@ -1600,16 +1879,16 @@ fn generiere_ffa(
             .push(neue_uuid.clone());
 
             let mut grundstuecke_belastet = Vec::new();
-            for belastet in a2_neu.belastete_flurstuecke.iter() {
+            for belastet in a2_neu.belastete_flurstuecke.iter().filter_map(|bv| bv.as_flurstueck()) {
 
                 let belastet_zahler = match belastet.flurstueck.split("/").nth(0).and_then(|p| p.parse::<usize>().ok()) {
                     Some(s) => format!("{:05}", s),
                     None => {
-                        warnungen.push(format!("{} Blatt {}: Unlesbares Flurstückskennzeichen: {:?}", 
-                            grundbuchblatt.titelblatt.grundbuch_von,
-                            grundbuchblatt.titelblatt.blatt,
-                            belastet.flurstueck, 
-                        ));
+                        warnungen.push(FfaWarnung::UnlesbaresFlurstueckskennzeichenAbt2 {
+                            blatt: grundbuchblatt.titelblatt.grundbuch_von.clone(), 
+                            nr: grundbuchblatt.titelblatt.blatt,
+                            kennzeichen: belastet.flurstueck.clone(), 
+                        });
                         continue;
                     }
                 };
@@ -1618,11 +1897,12 @@ fn generiere_ffa(
                     Some(s) => match s.parse::<usize>().ok() {
                         Some(s) => format!("{:04}", s),
                         None => {
-                            warnungen.push(format!("{} Blatt {}: Unlesbarer Nenner: {:?}", 
-                                grundbuchblatt.titelblatt.grundbuch_von,
-                                grundbuchblatt.titelblatt.blatt,
-                                belastet.flurstueck, 
-                            ));
+                            warnungen.push(FfaWarnung::UnlesbarerNennerAbt2 {
+                                blatt: grundbuchblatt.titelblatt.grundbuch_von.clone(), 
+                                lfd_nr: belastet.lfd_nr as u64,
+                                nr: grundbuchblatt.titelblatt.blatt,
+                                kennzeichen: belastet.flurstueck.clone(), 
+                            });
                             continue;
                         }
                     },
@@ -1640,7 +1920,9 @@ fn generiere_ffa(
                 let gemarkung_ids = match verfahren.gemarkungen.get(belastet_gemarkungsbezirk) {
                     Some(s) => s.clone(),
                     None => {
-                        warnungen.push(format!("Konnte Gemarkungs-ID für {:?} nicht finden", belastet_gemarkungsbezirk));
+                        warnungen.push(FfaWarnung::GemarkungsIdNichtGefunden {
+                            bezirk: belastet_gemarkungsbezirk.to_string(),
+                        });
                         continue;
                     }
                 };
@@ -1704,16 +1986,14 @@ fn generiere_ffa(
                         if gefuehrt_unter_lfd_nr.contains(&belastet.lfd_nr) {
                             grundstuecke_belastet.push(ax.lx21008); 
                         } else if !gefuehrt_unter_lfd_nr.is_empty() {
-                            /*
-                            warnungen.push(format!("{} Blatt {} Abt. 2 Recht {}: Flurstück {} unter lfd. Nr. {:?} gefunden, erwartete lfd. Nr. {}", 
-                                grundbuchblatt.titelblatt.grundbuch_von,
-                                grundbuchblatt.titelblatt.blatt,
-                                a2_neu.lfd_nr,
-                                ax.lx21008,
-                                gefuehrt_unter_lfd_nr,
-                                belastet.lfd_nr,
-                            ));
-                            */
+                            warnungen.push(FfaWarnung::FalscheLfdNrAbt2 {
+                                blatt: grundbuchblatt.titelblatt.grundbuch_von.clone(), 
+                                nr: grundbuchblatt.titelblatt.blatt,
+                                lfd_nr: a2_neu.lfd_nr as u64,
+                                lfd_nr_gefunden: gefuehrt_unter_lfd_nr,
+                                lfd_nr_erwartet: belastet.lfd_nr as u64,
+                                lx_21008: ax.lx21008.clone(), 
+                            });
                             grundstuecke_belastet.push(ax.lx21008); 
                         } else {
                             fsk_nicht_gefunden.entry((belastet_gemarkungsbezirk, belastet.flur, belastet.flurstueck.clone()))
@@ -1740,11 +2020,11 @@ fn generiere_ffa(
             }
 
             if grundstuecke_belastet.is_empty() {
-                warnungen.push(format!("{} Blatt {} Abt. 2 Recht {}: Keine belastetbaren Flurstücke gefunden, kann kein Recht erzeugen", 
-                    grundbuchblatt.titelblatt.grundbuch_von,
-                    grundbuchblatt.titelblatt.blatt,
-                    a2_neu.lfd_nr,
-                ));
+                warnungen.push(FfaWarnung::KeineBelastbarenFlurstueckeAbt2 {
+                    blatt: grundbuchblatt.titelblatt.grundbuch_von.clone(), 
+                    nr: grundbuchblatt.titelblatt.blatt,
+                    lfd_nr: a2_neu.lfd_nr as u64,
+                });
                 continue;
             }
 
@@ -1791,16 +2071,16 @@ fn generiere_ffa(
             .push(neue_uuid.clone());
 
             let mut grundstuecke_belastet = Vec::new();
-            'a3_inner: for belastet in a3_neu.belastete_flurstuecke.iter() {
+            'a3_inner: for belastet in a3_neu.belastete_flurstuecke.iter().filter_map(|bv| bv.as_flurstueck()) {
 
                 let belastet_zahler = match belastet.flurstueck.split("/").nth(0).and_then(|p| p.parse::<usize>().ok()) {
                     Some(s) => format!("{:05}", s),
                     None => {
-                        warnungen.push(format!("{} Blatt {}: Unlesbares Flurstückskennzeichen: {:?}", 
-                            grundbuchblatt.titelblatt.grundbuch_von,
-                            grundbuchblatt.titelblatt.blatt,
-                            belastet.flurstueck, 
-                        ));
+                        warnungen.push(FfaWarnung::UnlesbaresFlurstueckskennzeichenAbt3 {
+                            blatt: grundbuchblatt.titelblatt.grundbuch_von.clone(), 
+                            nr: grundbuchblatt.titelblatt.blatt,
+                            kennzeichen: belastet.flurstueck.clone(), 
+                        });
                         continue;
                     }
                 };
@@ -1809,11 +2089,12 @@ fn generiere_ffa(
                     Some(s) => match s.parse::<usize>().ok() {
                         Some(s) => format!("{:04}", s),
                         None => {
-                            warnungen.push(format!("{} Blatt {}: Unlesbarer Nenner: {:?}", 
-                                grundbuchblatt.titelblatt.grundbuch_von,
-                                grundbuchblatt.titelblatt.blatt,
-                                belastet.flurstueck, 
-                            ));
+                            warnungen.push(FfaWarnung::UnlesbarerNennerAbt3 {
+                                blatt: grundbuchblatt.titelblatt.grundbuch_von.clone(), 
+                                nr: grundbuchblatt.titelblatt.blatt,
+                                lfd_nr: belastet.lfd_nr as u64,
+                                kennzeichen: belastet.flurstueck.clone(), 
+                            });
                             continue;
                         }
                     },
@@ -1829,7 +2110,9 @@ fn generiere_ffa(
                 let gemarkung_ids = match verfahren.gemarkungen.get(belastet_gemarkungsbezirk) {
                     Some(s) => s.clone(),
                     None => {
-                        warnungen.push(format!("Konnte Gemarkungs-ID für {:?} nicht finden", belastet_gemarkungsbezirk));
+                        warnungen.push(FfaWarnung::GemarkungsIdNichtGefunden {
+                            bezirk: belastet_gemarkungsbezirk.to_string(),
+                        });
                         continue;
                     }
                 };
@@ -1893,16 +2176,14 @@ fn generiere_ffa(
                         if gefuehrt_unter_lfd_nr.contains(&belastet.lfd_nr) {
                             grundstuecke_belastet.push(ax.lx21008); 
                         } else if !gefuehrt_unter_lfd_nr.is_empty() {
-                            /*
-                            warnungen.push(format!("{} Blatt {} Abt. 3 Recht {}: Flurstück {} unter lfd. Nr. {:?} gefunden, erwartete lfd. Nr. {}", 
-                                grundbuchblatt.titelblatt.grundbuch_von,
-                                grundbuchblatt.titelblatt.blatt,
-                                a3_neu.lfd_nr,
-                                ax.lx21008,
-                                gefuehrt_unter_lfd_nr,
-                                belastet.lfd_nr,
-                            ));
-                            */
+                            warnungen.push(FfaWarnung::FalscheLfdNrAbt3 {
+                                blatt: grundbuchblatt.titelblatt.grundbuch_von.clone(), 
+                                nr: grundbuchblatt.titelblatt.blatt,
+                                lfd_nr: a3_neu.lfd_nr as u64,
+                                lfd_nr_gefunden: gefuehrt_unter_lfd_nr,
+                                lfd_nr_erwartet: belastet.lfd_nr as u64,
+                                lx_21008: ax.lx21008.clone(), 
+                            });
                             grundstuecke_belastet.push(ax.lx21008);
                         } else {
                             fsk_nicht_gefunden.entry((belastet_gemarkungsbezirk, belastet.flur, belastet.flurstueck.clone()))
@@ -1929,11 +2210,11 @@ fn generiere_ffa(
             }
 
             if grundstuecke_belastet.is_empty() {
-                warnungen.push(format!("{} Blatt {} Abt. 3 Recht {}: Keine belastbaren Flurstücke gefunden, kann kein Recht erzeugen", 
-                    grundbuchblatt.titelblatt.grundbuch_von,
-                    grundbuchblatt.titelblatt.blatt,
-                    a3_neu.lfd_nr,
-                ));
+                warnungen.push(FfaWarnung::KeineBelastbarenFlurstueckeAbt3 {
+                    blatt: grundbuchblatt.titelblatt.grundbuch_von.clone(), 
+                    nr: grundbuchblatt.titelblatt.blatt,
+                    lfd_nr: a3_neu.lfd_nr as u64,
+                });
                 continue;
             }
 
@@ -1980,7 +2261,11 @@ fn generiere_ffa(
                     abt2.buchungsstellen[0].clone()
                 },
                 _ => {
-                    warnungen.push(format!("{} Abteilung 2 lfd. Nr. {} hat mehr als eine Grundbuchblatt-Buchungsstelle?", grundbuch_name, abt2.lfd_nr));
+                    warnungen.push(FfaWarnung::MehrAlsEineGbBuchungsstelleAbt2 {
+                        blatt: grundbuchblatt.titelblatt.grundbuch_von.clone(), 
+                        nr: grundbuchblatt.titelblatt.blatt,
+                        lfd_nr: abt2.lfd_nr as u64,
+                    });
                     continue;
                 }
             };
@@ -2048,7 +2333,11 @@ fn generiere_ffa(
                     abt3.buchungsstellen[0].clone()
                 },
                 _ => {
-                    warnungen.push(format!("{} Abteilung 3 lfd. Nr. {} hat mehr als eine Grundbuchblatt-Buchungsstelle?", grundbuch_name, abt3.lfd_nr));
+                    warnungen.push(FfaWarnung::MehrAlsEineGbBuchungsstelleAbt3 {
+                        blatt: grundbuchblatt.titelblatt.grundbuch_von.clone(), 
+                        nr: grundbuchblatt.titelblatt.blatt,
+                        lfd_nr: abt3.lfd_nr as u64,
+                    });
                     continue;
                 }
             };
@@ -2114,22 +2403,25 @@ fn generiere_ffa(
             .flat_map(|(k, v)| v.clone().into_iter())
             .collect::<Vec<_>>();
 
-        nb_pro_onr.sort();
+        nb_pro_onr.sort_by(|a, b| a.0.name.cmp(&b.0.name));
         dedup_by::dedup_by(&mut nb_pro_onr, |a, b| {
             a.0.name == b.0.name
         });
 
         if nb_pro_onr.len() > 1 {
-            warnungen.push(format!("Kann Ordnungsnummer {}/00 nicht ersetzen: Mehr als ein Nebenbeteiliger für Ordnungsnummer: {:?}", onr, 
-                nb_pro_onr
-            ));
+            warnungen.push(FfaWarnung::MehrAlsEinNebenbeteiligterFuerOrdnungsnummer {
+                onr: onr as u64,
+                nb_pro_onr,
+            });
             continue;
         }
 
         let (nb, (lan16, bbb)) = match nb_pro_onr.first() {
             Some((nb, gmk)) => (nb.clone(), gmk.clone()),
             None => {
-                warnungen.push(format!("Kann Ordnungsnummer {}/00 nicht ersetzen: Kein Nebenbeteiliger in Grundbuch?", onr));
+                warnungen.push(FfaWarnung::KeinNebenbeteiligter {
+                    onr: onr as u64,
+                });
                 continue;
             }
         };
@@ -2154,7 +2446,10 @@ fn generiere_ffa(
                 let namensnummern_fuer_ordnungsnummer = s.get_lx_namensnummern();
                 if namensnummern_fuer_ordnungsnummer.len() > 1 {
                     // Irgendwas falsch: NB sollten nur eine Namensnummer haben
-                    warnungen.push(format!("Kann Ordnungsnummer {}/00 nicht ersetzen: Mehr als eine Namensnummer in LX_BuchungsblattBodenordnung", onr));
+                    warnungen.push(FfaWarnung::MehrAlsEineNamensnummer {
+                        onr: onr as u64,
+                        namensnummern_fuer_ordnungsnummer: namensnummern_fuer_ordnungsnummer.clone(), 
+                    });
                 }
 
                 let person_rolle = match namensnummern_fuer_ordnungsnummer.first().and_then(|f| {
@@ -2162,9 +2457,10 @@ fn generiere_ffa(
                 }) {
                     Some(s) => s.clone(),
                     None => {
-                        warnungen.push(format!("Kann Ordnungsnummer {}/00 nicht ersetzen: Keine LX_PersonRolle für LX_Namensnummer {:?}", 
-                            onr, namensnummern_fuer_ordnungsnummer
-                        ));
+                        warnungen.push(FfaWarnung::KeinePersonRolle {
+                            onr: onr as u64,
+                            namensnummern_fuer_ordnungsnummer,
+                        });
                         continue;
                     }
                 };
@@ -2172,9 +2468,10 @@ fn generiere_ffa(
                 let lx_person = match verfahren.personen.iter().find(|p| p.uuid == person_rolle.person_uuid) {
                     Some(s) => s.clone(),
                     None => {
-                        warnungen.push(format!("Kann Ordnungsnummer {}/00 nicht ersetzen: Keine LX_Person für LX_PersonRolle {}", 
-                            onr, person_rolle.uuid
-                        ));
+                        warnungen.push(FfaWarnung::KeinePerson {
+                            onr: onr as u64,
+                            person_rolle: person_rolle.uuid,
+                        });
                         continue;
                     }
                 };
@@ -2257,7 +2554,9 @@ fn generiere_ffa(
         let lx_ordnungsnummer_bodenordnung = match onr_zu_lx_ordnungsnummer_bodenordnung_map.get(&ordnungsnummer) {
             Some(s) => s,
             None => {
-                warnungen.push(format!("Konnte keine LxOrdnungsnummerBodenordnung für {}/00 finden.", ordnungsnummer));
+                warnungen.push(FfaWarnung::KeineOrdnungsnummerBodenordnung {
+                    onr: ordnungsnummer as u64,
+                });
                 continue; 
             },
         };
@@ -2307,7 +2606,9 @@ fn generiere_ffa(
             _ => { continue; },
         };
         if ri.is_empty() {
-            warnungen.push(format!("Recht {} hat keine Rechtsinhaber", desc));
+            warnungen.push(FfaWarnung::RechtHatKeineRechtsinhaberInsert {
+                desc: desc.to_string(),
+            });
         }
     }
     for r in &global_replace {
@@ -2317,14 +2618,19 @@ fn generiere_ffa(
             _ => { continue; },
         };
         if ri.is_empty() {
-            warnungen.push(format!("Recht {} hat keine Rechtsinhaber", desc));
+            warnungen.push(FfaWarnung::RechtHatKeineRechtsinhaberReplace {
+                desc: desc.to_string(),
+            });
         }
     }
 
     for ((gmk, flur, flurstueck), rechte) in fsk_nicht_gefunden {
-        warnungen.push(format!("Gemarkung {} Fl. {} Flst. {} nicht gefunden, benötigt von:\r\n{}",
-            gmk, flur, flurstueck, rechte.into_iter().map(|r| format!("    {}", r)).collect::<Vec<_>>().join("\r\n")
-        ));
+        warnungen.push(FfaWarnung::FlurstueckNichtGefunden {
+            gemarkung: gmk.to_string(),
+            flur: flur as u64,
+            flurstueck: flurstueck,
+            benoetigt_von: rechte,
+        });
     }
 
     warnungen.sort();
@@ -2718,6 +3024,10 @@ pub fn render(app_data: RefAny, data: &AppData) -> Dom {
                         StringMenuItem::new("Grundbuchvergleich".into())
                         .with_children(vec![
                             MenuItem::String(
+                                StringMenuItem::new("Liste aller Grundbuchblätter speichern unter...".into())
+                                .with_callback(app_data.clone(), grundbuchblaetter_auslesen)
+                            ),
+                            MenuItem::String(
                                 StringMenuItem::new("Alle -> nicht durchgeführt".into())
                                 .with_callback(app_data.clone(), gbve_alle_haken_loeschen)
                             ),
@@ -2728,15 +3038,21 @@ pub fn render(app_data: RefAny, data: &AppData) -> Dom {
                         ].into())
                     ),
                     MenuItem::String(
-                        StringMenuItem::new("Anteile".into())
+                        StringMenuItem::new("Ordnungsnummern".into())
                         .with_children(vec![
-                            MenuItem::String(StringMenuItem::new("Alle -> 1/1".into()))
+                            MenuItem::String(
+                                StringMenuItem::new("Liste aller Ordnungsnummern speichern unter...".into())
+                                .with_callback(app_data.clone(), ordnungsnummern_auslesen)
+                            )
                         ].into())
                     ),
                     MenuItem::String(
                         StringMenuItem::new("Adressen".into())
                         .with_children(vec![
-                            MenuItem::String(StringMenuItem::new("Feld \"Land\" bereinigen".into()))
+                            MenuItem::String(
+                                StringMenuItem::new("Liste aller Adressen speichern unter...".into())
+                                .with_callback(app_data.clone(), addressen_auslesen)
+                            )
                         ].into())
                     ),
                     MenuItem::String(
@@ -2811,6 +3127,221 @@ fn ffa_aus_datei_ausfuehren(app_data: &mut RefAny, info: &mut CallbackInfo) -> U
     };
 
     Update::RefreshDom
+}
+
+extern "C"
+fn grundbuchblaetter_auslesen(app_data: &mut RefAny, info: &mut CallbackInfo) -> Update {
+    
+    use azul::dialog::{FileDialog, MsgBox};
+    use crate::wsdl::KennzeichnungAlterNeuerBestand;
+
+    let data_clone = app_data.clone();
+    let data = match app_data.downcast_ref::<AppData>() {
+        Some(s) => s,
+        None => return Update::DoNothing,
+    };
+    
+    let data = &*data;
+    
+    let verfahren = match data.ausgewaehltes_verfahren
+        .as_ref()
+        .and_then(|s| data.geladene_verfahren.verfahren.iter().find(|v| v.uuid.as_str() == s.as_str())) {
+        Some(s) => s,
+        None => { return Update::DoNothing; },
+    };
+
+    let datei_pfad = match FileDialog::save_file("Liste Grundbuchblätter speichern unter".into(), None.into()).into_option() {
+        Some(s) => s,
+        None => { return Update::DoNothing; },
+    };
+    let mut datei_pfad = datei_pfad.as_str().to_string();
+    if !datei_pfad.ends_with(".tsv") {
+        datei_pfad = format!("{}.tsv", datei_pfad);
+    }
+
+    let lines = verfahren.buchungsblatt_bodenordnung
+        .iter()
+        .filter(|gb| !gb.nebenbeteiligten_blatt)
+        .filter(|gb| !gb.gehoert_zu_ordnungsnummern.is_empty())
+        .filter(|gb| gb.ax_buchungsblatt.blt == 1000)
+        .filter(|gb| gb.kan == KennzeichnungAlterNeuerBestand::AlterBestand)
+        .map(|gb| format!("{}\t{}\t{}\t{}", 
+            if gb.grundbuchvergleich_durchgefuehrt { "JA" } else { "NEIN" },
+            gb.ax_buchungsblatt.bbb_name.clone().unwrap_or_default(),
+            gb.ax_buchungsblatt.bbn,
+            gb.gehoert_zu_ordnungsnummern.iter()
+            .map(|onr| format!("{}/{:02}", onr.stammnummer, onr.unternummer))
+            .collect::<Vec<_>>()
+            .join(", ")
+        ))
+        .collect::<Vec<_>>();
+
+    let tsv = format!("ABGEGLICHEN\tBUCHUNGSBLATTBEZIRK\tNUMMER\tORDNUNGSNUMMER(N)\r\n{}", lines.join("\r\n"));
+
+    let _ = std::fs::write(&datei_pfad, &tsv.as_bytes());
+
+    Update::DoNothing
+}
+
+extern "C"
+fn addressen_auslesen(app_data: &mut RefAny, info: &mut CallbackInfo) -> Update {
+    Update::DoNothing
+}
+
+extern "C"
+fn ordnungsnummern_auslesen(app_data: &mut RefAny, info: &mut CallbackInfo) -> Update {
+    
+    use azul::dialog::{FileDialog, MsgBox};
+    use crate::wsdl::KennzeichnungAlterNeuerBestand;
+
+    let data_clone = app_data.clone();
+    let data = match app_data.downcast_ref::<AppData>() {
+        Some(s) => s,
+        None => return Update::DoNothing,
+    };
+    
+    let data = &*data;
+    
+    let verfahren = match data.ausgewaehltes_verfahren
+        .as_ref()
+        .and_then(|s| data.geladene_verfahren.verfahren.iter().find(|v| v.uuid.as_str() == s.as_str())) {
+        Some(s) => s,
+        None => { return Update::DoNothing; },
+    };
+
+    let datei_pfad = match FileDialog::save_file("Liste Ordnungsnummern speichern unter".into(), None.into()).into_option() {
+        Some(s) => s,
+        None => { return Update::DoNothing; },
+    };
+    let mut datei_pfad = datei_pfad.as_str().to_string();
+    if !datei_pfad.ends_with(".tsv") {
+        datei_pfad = format!("{}.tsv", datei_pfad);
+    }
+
+    let lines = verfahren.ordnungsnummern
+    .iter()
+    .filter(|onr| onr.kan == KennzeichnungAlterNeuerBestand::AlterBestand)
+    .filter(|onr| !onr.ordnungsnummer_personen.is_empty())
+    .flat_map(|onr| {
+        
+        let stammnummer = onr.stammnummer;
+        let unternummer = onr.unternummer;
+
+        let gb = verfahren.buchungsblatt_bodenordnung.iter()
+            .filter(|gb| gb.ax_buchungsblatt.blt == 1000)
+            .filter(|gb| gb.kan == KennzeichnungAlterNeuerBestand::AlterBestand)
+            .filter(|gb| {
+                gb.gehoert_zu_ordnungsnummern
+                .iter()
+                .any(|o|o.stammnummer == onr.stammnummer && o.unternummer == onr.unternummer)
+            })
+            .collect::<Vec<_>>();
+
+        if gb.is_empty() {
+            Vec::new()
+        } else {
+            gb.iter().flat_map(|b| {            
+                onr.ordnungsnummer_personen.iter().flat_map(|op| {                    
+                    op.ax_buchungsblatt.buchungsstellen.iter().flat_map(|bs| {
+
+                        let person_rollen = verfahren.personen_rollen.iter().filter(|pr| {
+                            pr.lx_namensnummer_uuid == bs.lx_namensnummer
+                        }).collect::<Vec<_>>();
+
+                        person_rollen.into_iter().flat_map(|pr| {
+
+                            let lx_person = match verfahren.personen.iter().find(|p| p.uuid == pr.person_uuid) {
+                                Some(s) => s,
+                                None => return Vec::new(),
+                            };
+        
+                            let grundbuchblatt_name = b.ax_buchungsblatt.bbb_name.clone().unwrap_or_default();
+                            let blatt_nr = b.ax_buchungsblatt.bbn.clone();
+                            
+                            let rolle = format!("{:?}", pr.art);
+                            let anrede = lx_person.ax_person.anrede.as_ref().map(|a| format!("{:?}", a)).unwrap_or_default();
+                            let titel = lx_person.ax_person.titel.clone().unwrap_or_default();
+                            let vorname = lx_person.ax_person.vorname.clone().unwrap_or_default();
+                            let nachname_oder_firma = lx_person.ax_person.nachname_oder_firma.clone();
+                            let geburtsname = lx_person.ax_person.geburtsname.clone().unwrap_or_default();
+                            let wohnort = lx_person.ax_person.wohnort.clone().unwrap_or_default();
+                            
+                            if lx_person.ax_person.anschriften.is_empty() {
+                                vec![format!(
+                                    "{}\t{}\t{}\t{}\t{}\t{}\t{}\t{}\t{}\t{}\t{}\t\t\t\t\t\t\t\t\t",
+                                    stammnummer,
+                                    unternummer,
+                                    grundbuchblatt_name,
+                                    blatt_nr,
+                                    rolle,
+                                    anrede,
+                                    titel,
+                                    vorname,
+                                    nachname_oder_firma,
+                                    geburtsname,
+                                    wohnort,
+                                )]
+                            } else {
+                                lx_person.ax_person.anschriften.iter().map(|anschrift| {
+                                    format!(
+                                        "{}\t{}\t{}\t{}\t{}\t{}\t{}\t{}\t{}\t{}\t{}\t{}\t{}\t{}\t{}\t{}\t{}\t{}\t{}\t{}",
+                                        stammnummer,
+                                        unternummer,
+                                        grundbuchblatt_name,
+                                        blatt_nr,
+                                        rolle,
+                                        anrede,
+                                        titel,
+                                        vorname,
+                                        nachname_oder_firma,
+                                        geburtsname,
+                                        wohnort,
+                                        anschrift.ortsname_postalisch,
+                                        anschrift.ortsname_amtlich.clone().unwrap_or_default(),
+                                        anschrift.postleitzahl.clone().unwrap_or_default(),
+                                        anschrift.bestimmungsland.clone().unwrap_or_default(),
+                                        anschrift.ortsteil.clone().unwrap_or_default(),
+                                        anschrift.strasse.clone().unwrap_or_default(),
+                                        anschrift.hausnummer.clone().unwrap_or_default(),
+                                        anschrift.postfach_nr.clone().unwrap_or_default(),
+                                        anschrift.postfach_postleitzahl.clone().unwrap_or_default(),
+                                    )
+                                }).collect()
+                            }
+                        })
+                    })
+                })
+            }).collect::<Vec<_>>()
+        } 
+    })
+    .collect::<Vec<_>>();
+
+    let tsv_columns = vec![
+        "NR",
+        "UNTERNR",
+        "ROLLE",
+        "ANREDE",
+        "TITEL",
+        "VORNAME",
+        "NACHNAME_ODER_FIRMA",
+        "GEBURTSNAME",
+        "WOHNORT",
+        "ANSCHRIFT_ORT_POSTALISCH",
+        "ANSCHRIFT_ORT_AMTLICH",
+        "ANSCHRIFT_PLZ",
+        "ANSCHRIFT_LAND",
+        "ANSCHRIFT_ORTSTEIL",
+        "ANSCHRIFT_STRASSE",
+        "ANSCHRIFT_HAUSNR",
+        "ANSCHRIFT_POSTFACH",
+        "ANSCHRIFT_POSTFACH_PLZ",
+    ].join("\t");
+
+    let tsv = format!("{}\r\n{}", tsv_columns, lines.join("\r\n"));
+
+    let _ = std::fs::write(&datei_pfad, &tsv.as_bytes());
+
+    Update::DoNothing
 }
 
 extern "C"
