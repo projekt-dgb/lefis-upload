@@ -1176,19 +1176,30 @@ impl DhkVerbindung {
             // AX_Person => AX_Anschrift
             let mut ax_person_ax_anschrift_map = BTreeMap::new();
             let query_ax_person_ax_anschrift_map = format!("SELECT OFID, DFID FROM {schema}.A_AX21001_AX21003");
+
+            let mut stmt = self.conn.prepare(&query_ax_person_ax_anschrift_map, &[StmtParam::FetchArraySize(10000)])
+            .map_err(|e| {
+                format!("FEHLER in conn.prepare(\"{}\"): {}", query_ax_person_ax_anschrift_map, e)
+            })?;
+
             // OFID = AX_Person
             // DFID = AX_Anschrift
-            if let Ok(rr) = stmt.query_as::<(String, String)>(&[]) {
-                for (ax_person_uuid, ax_anschrift_uuid) in rr.into_iter().filter_map(|o| o.ok()) {
-                    if let Some(ax_adresse) = ax_anschriften.get(&ax_anschrift_uuid) {
-                        ax_person_ax_anschrift_map
-                        .entry(ax_person_uuid)
-                        .or_insert_with(|| Vec::new())
-                        .push(ax_adresse.clone());
+            match stmt.query_as::<(String, String)>(&[]) {
+                Ok(rr) => { 
+                    for (ax_person_uuid, ax_anschrift_uuid) in rr.into_iter().filter_map(|o| o.ok()) {
+                        if let Some(ax_adresse) = ax_anschriften.get(&ax_anschrift_uuid) {
+                            ax_person_ax_anschrift_map
+                            .entry(ax_person_uuid)
+                            .or_insert_with(|| Vec::new())
+                            .push(ax_adresse.clone());
+                        }
                     }
+                },
+                Err(e) => {
+                    println!("ERROR: {}", e);
                 }
             }
-                
+            
             // Lade alle LX_Person / AxPerson aus dem Verfahren
             let query_lx_person = format!("
                 SELECT a.UUID, a.BEG, a.LX91003, b.UUID, b.BEG, b.ANR, b.VNA, b.NBA, b.AKD, b.GNA, b.GEB, b.WOS, b.BER, b.SOS, b.HLG, b.NOF FROM {schema}.LX21001 a 
@@ -1273,8 +1284,7 @@ impl DhkVerbindung {
                 INNER JOIN {schema}.A_LX21001_LX22004 b ON b.DFID = a.UUID 
                 INNER JOIN {schema}.LX21001 c ON c.UUID = b.OFID
                 INNER JOIN {schema}.A_LX21006_LX22004 d ON d.DFID = a.UUID
-                INNER JOIN {schema}.LX21006 e ON e.UUID = d.OFID", 
-                schema = schema
+                INNER JOIN {schema}.LX21006 e ON e.UUID = d.OFID"
             );
             
             let mut stmt = self.conn.prepare(&query_lx_person_rolle, &[StmtParam::FetchArraySize(10000)])

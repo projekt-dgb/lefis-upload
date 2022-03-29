@@ -3254,7 +3254,7 @@ fn ordnungsnummern_auslesen(app_data: &mut RefAny, info: &mut CallbackInfo) -> U
                                 Some(s) => s,
                                 None => return Vec::new(),
                             };
-        
+
                             let grundbuchblatt_name = b.ax_buchungsblatt.bbb_name.clone().unwrap_or_default();
                             let blatt_nr = b.ax_buchungsblatt.bbn.clone();
                             
@@ -3319,6 +3319,8 @@ fn ordnungsnummern_auslesen(app_data: &mut RefAny, info: &mut CallbackInfo) -> U
     let tsv_columns = vec![
         "NR",
         "UNTERNR",
+        "BLATT",
+        "BLATT_NR",
         "ROLLE",
         "ANREDE",
         "TITEL",
