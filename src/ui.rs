@@ -3047,15 +3047,6 @@ pub fn render(app_data: RefAny, data: &AppData) -> Dom {
                         ].into())
                     ),
                     MenuItem::String(
-                        StringMenuItem::new("Adressen".into())
-                        .with_children(vec![
-                            MenuItem::String(
-                                StringMenuItem::new("Liste aller Adressen speichern unter...".into())
-                                .with_callback(app_data.clone(), addressen_auslesen)
-                            )
-                        ].into())
-                    ),
-                    MenuItem::String(
                         StringMenuItem::new("Fortführungsauftrag aus Datei ausführen...".into())
                         .with_callback(app_data.clone(), ffa_aus_datei_ausfuehren)
                     ),
@@ -3180,11 +3171,6 @@ fn grundbuchblaetter_auslesen(app_data: &mut RefAny, info: &mut CallbackInfo) ->
 
     let _ = std::fs::write(&datei_pfad, &tsv.as_bytes());
 
-    Update::DoNothing
-}
-
-extern "C"
-fn addressen_auslesen(app_data: &mut RefAny, info: &mut CallbackInfo) -> Update {
     Update::DoNothing
 }
 
